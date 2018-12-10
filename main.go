@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"flag"
@@ -15,7 +14,6 @@ import (
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh/terminal"
 )
 
 func main() {
@@ -38,10 +36,12 @@ func run() error {
 			return fmt.Errorf("unknown args: %v", tail)
 		}
 		return initShh()
+	case "get":
+		return get(tail)
 	case "set":
 		return set(tail)
 	default:
-		return fmt.Errorf("unknown arg: %s")
+		return fmt.Errorf("unknown arg: %s", arg)
 	}
 }
 
@@ -109,7 +109,7 @@ func initShh() error {
 
 		// State 2: .shh exists but is missing user.
 		// Add user to .shh
-		shh.Keys[user.Username] = user.PublicKeyBlock
+		shh.Keys[user.Username] = user.Keys.PublicKeyBlock
 		return shh.EncodeToPath(".shh")
 	}
 
@@ -132,6 +132,10 @@ func initShhCreateConfig(configPath string) error {
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
+	}
+	user.Password, err = requestPassword()
+	if err != nil {
+		return errors.Wrap(err, "request password")
 	}
 
 	// Retrieve shh, append the user's pub key, rewrite file
@@ -174,100 +178,6 @@ func initShhCreateUser(configPath string) error {
 	return errors.Wrap(err, "encode to path")
 }
 
-func createUser(configPath string) (*User, error) {
-	fmt.Print("username (usually email): ")
-	var username string
-	_, err := fmt.Scan(&username)
-	if err != nil {
-		return nil, err
-	}
-	if username == "" {
-		return nil, errors.New("empty username")
-	}
-
-	fmt.Print("password: ")
-	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print("\n")
-	if len(string(password)) < 24 {
-		// The goal is to make manual entry so inconvenient that it's
-		// never used. Use a password manager and a randomly generated
-		// password instead.
-		return nil, errors.New("password must be >= 24 chars")
-	}
-	user := &User{
-		Username: username,
-		Password: password,
-	}
-
-	// Create ~/.config/shh folder
-	err = os.MkdirAll(configPath, 0700)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create public and private keys
-	user.PublicKeyBlock, err = createKeys(configPath, user.Password)
-	if err != nil {
-		return nil, errors.Wrap(err, "create keys")
-	}
-
-	// Create initial config file (644) specifying username
-	content := []byte(fmt.Sprintf("username=%s", user.Username))
-	err = ioutil.WriteFile(filepath.Join(configPath, "config"), content, 0644)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
-}
-
-// getUser from the ~/.config/shh/config file. If the user already exists in
-// the project's shh key, this returns nil User and nil error.
-func getUser(configPath string) (*User, error) {
-	configFilePath := filepath.Join(configPath, "config")
-	config, err := ConfigFromPath(configFilePath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "read %s", configFilePath)
-	}
-
-	block, err := getPublicKeyBlock(configPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "get pub key block")
-	}
-	u := &User{
-		Username:       config.Username,
-		PublicKeyBlock: block,
-	}
-
-	// Check if the user already exists in the shh before continuing
-	shh, err := ShhFromPath(".shh")
-	if err != nil {
-		return nil, err
-	}
-	if _, exist := shh.Keys[config.Username]; exist {
-		return u, nil
-	}
-
-	fmt.Printf("> adding user %s to project\n", config.Username)
-	fmt.Print("password: ")
-	u.Password, err = terminal.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print("\n")
-	if len(string(u.Password)) < 24 {
-		// The goal is to make manual entry so inconvenient that it's
-		// never used. Use a password manager and a randomly generated
-		// password instead.
-		return nil, errors.New("password must be >= 24 chars")
-	}
-
-	// TODO(egtann) validate password on private key and error out if bad
-	return u, nil
-}
-
 func initShhCreateConfigAndUser(configPath string) error {
 	fmt.Println("> creating new .shh")
 	user, err := createUser(configPath)
@@ -277,7 +187,7 @@ func initShhCreateConfigAndUser(configPath string) error {
 
 	// Create initial .shh file (600)
 	shh := NewShh()
-	shh.Keys[user.Username] = user.PublicKeyBlock
+	shh.Keys[user.Username] = user.Keys.PublicKeyBlock
 	if err = shh.EncodeToPath(".shh"); err != nil {
 		return err
 	}
@@ -294,59 +204,6 @@ func getPublicKeyBlock(pth string) (*pem.Block, error) {
 	return block, nil
 }
 
-// createKeys at the given path, returning the public key pem block for use in
-// the .shh file.
-func createKeys(pth string, password []byte) (*pem.Block, error) {
-	keyPath := filepath.Join(pth, "id_rsa")
-
-	// Generate id_rsa (600) and id_rsa.pub (644)
-	privKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		return nil, err
-	}
-	flags := os.O_CREATE | os.O_WRONLY | os.O_EXCL
-	privKeyFile, err := os.OpenFile(keyPath, flags, 0600)
-	if err != nil {
-		return nil, err
-	}
-	defer privKeyFile.Close()
-
-	block := &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privKey),
-	}
-	block, err = x509.EncryptPEMBlock(
-		rand.Reader,
-		block.Type,
-		block.Bytes,
-		password,
-		x509.PEMCipherAES256,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err = pem.Encode(privKeyFile, block); err != nil {
-		return nil, err
-	}
-
-	keyPath += ".pub"
-	pubKeyFile, err := os.OpenFile(keyPath, flags, 0644)
-	if err != nil {
-		return nil, err
-	}
-	defer pubKeyFile.Close()
-
-	pubKey := privKey.Public().(*rsa.PublicKey)
-	block = &pem.Block{
-		Type:  "RSA PUBLIC KEY",
-		Bytes: x509.MarshalPKCS1PublicKey(pubKey),
-	}
-	if err = pem.Encode(pubKeyFile, block); err != nil {
-		return nil, err
-	}
-	return block, nil
-}
-
 // TODO enforce 600 permissions on id_rsa file and .shh when any command is run
 
 // get a secret value by name.
@@ -354,11 +211,35 @@ func get(args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `get $name`")
 	}
+	secretName := args[0]
 	shh, err := ShhFromPath(".shh")
 	if err != nil {
 		return err
 	}
-	// TODO finish
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	password, err := requestPassword()
+	if err != nil {
+		return errors.Wrap(err, "request password")
+	}
+	keys, err := getKeys(configPath, password)
+	if err != nil {
+		return err
+	}
+	secret, err := base64.StdEncoding.DecodeString(shh.Secrets[secretName])
+	if err != nil {
+		return err
+	}
+	plaintext, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
+		keys.PrivateKey, secret, []byte(secretName))
+	if err != nil {
+		return errors.Wrap(err, "decrypt secret")
+	}
+	fmt.Println(string(plaintext))
+	return nil
 }
 
 // set a secret value.
@@ -374,16 +255,11 @@ func set(args []string) error {
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(home, ".config", "shh")
-	block, err := getPublicKeyBlock(configPath)
+	keys, err := getPublicKey(filepath.Join(home, ".config", "shh"))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "get public key")
 	}
-	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
-	if err != nil {
-		return err
-	}
-	byt, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey,
+	byt, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, keys.PublicKey,
 		[]byte(args[1]), []byte(args[0]))
 	if err != nil {
 		return err
