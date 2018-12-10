@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -36,6 +38,8 @@ func run() error {
 			return fmt.Errorf("unknown args: %v", tail)
 		}
 		return initShh()
+	case "set":
+		return set(tail)
 	default:
 		return fmt.Errorf("unknown arg: %s")
 	}
@@ -53,12 +57,13 @@ func parseArg(args []string) (string, []string) {
 	}
 }
 
-// initShh handling 4 possible states:
+// initShh handling 5 possible states:
 //
-// 1. ~/.config/shh and .shh exist (noop)
-// 2. ~/.config/shh exists, but .shh does not (first run in new project)
-// 3. ~/.config/shh does not exist, but .shh does (first run in existing project)
-// 4. ~/.config/shh and .shh are both missing (first run ever)
+// 1. ~/.config/shh and .shh exist, and .shh has user (noop)
+// 2. ~/.config/shh and .shh exist, but .shh is missing user (add user to shh)
+// 3. ~/.config/shh exists, but .shh does not (first run in new project)
+// 4. ~/.config/shh does not exist, but .shh does (first run in existing project)
+// 5. ~/.config/shh and .shh are both missing (first run ever)
 func initShh() error {
 	home, err := homedir.Dir()
 	if err != nil {
@@ -84,28 +89,47 @@ func initShh() error {
 		return err
 	}
 
-	// State 1: noop
+	// Check if user exists in secret file if we have a config. If not, we
+	// add the user to the file before continuing
+	//
+	// TODO: do this on every action?
 	if configExists && secretExists {
-		return nil
+		user, err := getUser(configPath)
+		if err != nil {
+			return errors.Wrap(err, "get user")
+		}
+		shh, err := ShhFromPath(".shh")
+		if err != nil {
+			return err
+		}
+		if _, exist := shh.Keys[user.Username]; exist {
+			// State 1: noop
+			return nil
+		}
+
+		// State 2: .shh exists but is missing user.
+		// Add user to .shh
+		shh.Keys[user.Username] = user.PublicKeyBlock
+		return shh.EncodeToPath(".shh")
 	}
 
-	// State 2: first run in new project
+	// State 3: first run in new project
 	if configExists && !secretExists {
 		return initShhCreateConfig(configPath)
 	}
 
-	// State 3: first run in existing project
+	// State 4: first run in existing project
 	if !configExists && secretExists {
 		return initShhCreateUser(configPath)
 	}
 
-	// State 4: first ever run
+	// State 5: first ever run
 	return initShhCreateConfigAndUser(configPath)
 }
 
 // initShhCreateConfig adds an existing user to a new .shh file.
 func initShhCreateConfig(configPath string) error {
-	user, err := getUser()
+	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
@@ -201,15 +225,20 @@ func createUser(configPath string) (*User, error) {
 
 // getUser from the ~/.config/shh/config file. If the user already exists in
 // the project's shh key, this returns nil User and nil error.
-func getUser() (*User, error) {
-	home, err := homedir.Dir()
+func getUser(configPath string) (*User, error) {
+	configFilePath := filepath.Join(configPath, "config")
+	config, err := ConfigFromPath(configFilePath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "read %s", configFilePath)
 	}
-	configPath := filepath.Join(home, ".config", "shh", "config")
-	config, err := ConfigFromPath(configPath)
+
+	block, err := getPublicKeyBlock(configPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "read %s", configPath)
+		return nil, errors.Wrap(err, "get pub key block")
+	}
+	u := &User{
+		Username:       config.Username,
+		PublicKeyBlock: block,
 	}
 
 	// Check if the user already exists in the shh before continuing
@@ -218,27 +247,24 @@ func getUser() (*User, error) {
 		return nil, err
 	}
 	if _, exist := shh.Keys[config.Username]; exist {
-		panic("get existing user")
+		return u, nil
 	}
 
 	fmt.Printf("> adding user %s to project\n", config.Username)
 	fmt.Print("password: ")
-	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	u.Password, err = terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return nil, err
 	}
 	fmt.Print("\n")
-	if len(string(password)) < 24 {
+	if len(string(u.Password)) < 24 {
 		// The goal is to make manual entry so inconvenient that it's
 		// never used. Use a password manager and a randomly generated
 		// password instead.
 		return nil, errors.New("password must be >= 24 chars")
 	}
 
-	u := &User{
-		Username: config.Username,
-		Password: password,
-	}
+	// TODO(egtann) validate password on private key and error out if bad
 	return u, nil
 }
 
@@ -323,9 +349,49 @@ func createKeys(pth string, password []byte) (*pem.Block, error) {
 
 // TODO enforce 600 permissions on id_rsa file and .shh when any command is run
 
-// get
+// get a secret value by name.
+func get(args []string) error {
+	if len(args) != 1 {
+		return errors.New("bad args: expected `get $name`")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	// TODO finish
+}
 
-// set
+// set a secret value.
+func set(args []string) error {
+	if len(args) != 2 {
+		return errors.New("bad args: expected `set $name $val`")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	block, err := getPublicKeyBlock(configPath)
+	if err != nil {
+		return err
+	}
+	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
+	if err != nil {
+		return err
+	}
+	byt, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey,
+		[]byte(args[1]), []byte(args[0]))
+	if err != nil {
+		return err
+	}
+	shh.Secrets[args[0]] = base64.StdEncoding.EncodeToString(byt)
+	err = shh.EncodeToPath(".shh")
+	return errors.Wrap(err, "encode to path")
+}
 
 // del
 

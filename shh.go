@@ -23,7 +23,7 @@ func NewShh() *Shh {
 }
 
 func ShhFromPath(pth string) (*Shh, error) {
-	flags := os.O_CREATE | os.O_RDWR | os.O_TRUNC
+	flags := os.O_CREATE | os.O_RDWR
 	fi, err := os.OpenFile(pth, flags, 0644)
 	if err != nil {
 		return nil, err
