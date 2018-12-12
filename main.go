@@ -1,13 +1,17 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -40,6 +44,12 @@ func run() error {
 		return get(tail)
 	case "set":
 		return set(tail)
+	case "del":
+		return del(tail)
+	case "allow":
+		return allow(tail)
+	case "deny":
+		return deny(tail)
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
 	}
@@ -221,24 +231,47 @@ func get(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	password, err := requestPassword()
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+	user.Password, err = requestPassword()
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
-	keys, err := getKeys(configPath, password)
+	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
 		return err
 	}
-	secret, err := base64.StdEncoding.DecodeString(shh.Secrets[secretName])
+	secrets, err := shh.GetSecretsForUser(secretName, user.Username)
 	if err != nil {
 		return err
 	}
-	plaintext, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
-		keys.PrivateKey, secret, []byte(secretName))
-	if err != nil {
-		return errors.Wrap(err, "decrypt secret")
+	for _, secret := range secrets {
+		// Decrypt the AES key using the private key
+		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
+			keys.PrivateKey, []byte(secret.AESKey), nil)
+		if err != nil {
+			return errors.Wrap(err, "decrypt secret")
+		}
+
+		// Use the decrypted AES key to decrypt the secret
+		aesBlock, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+
+		if len(secret.Encrypted) < aes.BlockSize {
+			return errors.New("encrypted secret too short")
+		}
+		ciphertext := []byte(secret.Encrypted)
+		iv := ciphertext[:aes.BlockSize]
+		ciphertext = ciphertext[aes.BlockSize:]
+		stream := cipher.NewCFBDecrypter(aesBlock, iv)
+		plaintext := make([]byte, len(ciphertext))
+		stream.XORKeyStream(plaintext, []byte(ciphertext))
+		fmt.Println(string(plaintext))
 	}
-	fmt.Println(string(plaintext))
 	return nil
 }
 
@@ -255,27 +288,233 @@ func set(args []string) error {
 	if err != nil {
 		return err
 	}
-	keys, err := getPublicKey(filepath.Join(home, ".config", "shh"))
-	if err != nil {
-		return errors.Wrap(err, "get public key")
-	}
-	byt, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, keys.PublicKey,
-		[]byte(args[1]), []byte(args[0]))
+	configPath := filepath.Join(home, ".config", "shh")
+	user, err := getUser(configPath)
 	if err != nil {
 		return err
 	}
-	shh.Secrets[args[0]] = base64.StdEncoding.EncodeToString(byt)
+	if _, exist := shh.Secrets[user.Username]; !exist {
+		shh.Secrets[user.Username] = map[string]Secret{}
+	}
+	keys, err := getPublicKey(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get public key")
+	}
+
+	// Encrypt the secret using an AES key
+	aesKey := make([]byte, 32)
+	if _, err := rand.Read(aesKey); err != nil {
+		return errors.Wrap(err, "read aes key")
+	}
+	aesBlock, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return errors.Wrap(err, "new aes cipher")
+	}
+	plaintext := args[1]
+	encrypted := make([]byte, aes.BlockSize+len(plaintext))
+	iv := encrypted[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return errors.Wrap(err, "read iv")
+	}
+	stream := cipher.NewCFBEncrypter(aesBlock, iv)
+	stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
+
+	// Encrypt the AES key using the private RSA key
+	aesKey, err = rsa.EncryptOAEP(sha256.New(), rand.Reader,
+		keys.PublicKey, []byte(aesKey), nil)
+	if err != nil {
+		return errors.Wrap(err, "encrypt aes key")
+	}
+	sec := Secret{
+		AESKey:    base64.StdEncoding.EncodeToString(aesKey),
+		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+	}
+	shh.Secrets[user.Username][args[0]] = sec
 	err = shh.EncodeToPath(".shh")
 	return errors.Wrap(err, "encode to path")
 }
 
-// del
+// del deletes a secret for all users.
+func del(args []string) error {
+	if len(args) != 1 {
+		return errors.New("bad args: expected `del $secret`")
+	}
+	secret := args[0]
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	user, err := getUser(configPath)
+	if err != nil {
+		return err
+	}
+	secrets, err := shh.GetSecretsForUser(secret, user.Username)
+	if err != nil {
+		return err
+	}
+	userSecrets := shh.Secrets[user.Username]
+	for key := range secrets {
+		delete(userSecrets, key)
+	}
+	if len(userSecrets) == 0 {
+		delete(shh.Secrets, user.Username)
+	}
+	err = shh.EncodeToPath(".shh")
+	return errors.Wrap(err, "encode to path")
+}
 
-// allow
+// allow a user to access a secret. You must have access yourself.
+//
+// TODO allow all using "$user *" syntax.
+func allow(args []string) error {
+	if len(args) != 2 {
+		return errors.New("bad args: expected `allow $user $secret`")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	username := Username(args[0])
+	secretKey := args[1]
+	block, exist := shh.Keys[username]
+	if !exist {
+		return fmt.Errorf("%s is not in the project", username)
+	}
+	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
+	if err != nil {
+		return errors.Wrap(err, "parse public key")
+	}
 
-// deny
+	// Decrypt all matching secrets
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+	user.Password, err = requestPassword()
+	if err != nil {
+		return errors.Wrap(err, "request password")
+	}
+	keys, err := getKeys(configPath, user.Password)
+	if err != nil {
+		return errors.Wrap(err, "get keys")
+	}
+	secrets, err := shh.GetSecretsForUser(secretKey, user.Username)
+	if err != nil {
+		return err
+	}
+	if len(secrets) == 0 {
+		return errors.New("no matching secrets which you can access")
+	}
+	if _, exist := shh.Secrets[username]; !exist {
+		shh.Secrets[username] = map[string]Secret{}
+	}
+	for key, secret := range secrets {
+		// Decrypt AES key using personal RSA key
+		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
+			keys.PrivateKey, []byte(secret.AESKey), nil)
+		if err != nil {
+			return errors.Wrap(err, "decrypt secret")
+		}
+		aesBlock, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+		ciphertext := []byte(secret.Encrypted)
+		iv := ciphertext[:aes.BlockSize]
+		ciphertext = ciphertext[aes.BlockSize:]
+		stream := cipher.NewCFBDecrypter(aesBlock, iv)
+		plaintext := make([]byte, len(ciphertext))
+		stream.XORKeyStream(plaintext, []byte(ciphertext))
+
+		// Generate an AES key to encrypt the data. We use AES-256
+		// which requires a 32-byte key
+		aesKey = make([]byte, 32)
+		if _, err := rand.Read(aesKey); err != nil {
+			return err
+		}
+
+		// Encrypt the secret using the new AES key
+		encrypted := make([]byte, aes.BlockSize+len(plaintext))
+		iv = encrypted[:aes.BlockSize]
+		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+			return errors.Wrap(err, "read iv")
+		}
+		stream = cipher.NewCFBEncrypter(aesBlock, iv)
+		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
+
+		// Encrypt the secret using that AES key
+		aesBlock, err = aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+
+		// Encrypt the AES key using the public key
+		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
+			pubKey, aesKey, []byte(key))
+		if err != nil {
+			return errors.Wrap(err, "reencrypt secret")
+		}
+
+		// We base64 encode all encrypted data before passing it into
+		// the .shh file
+		sec := Secret{
+			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
+			Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+		}
+
+		// Add encrypted data and key to .shh
+		shh.Secrets[username][key] = sec
+	}
+	return shh.EncodeToPath(".shh")
+}
+
+// deny a user from accessing secrets.
+func deny(args []string) error {
+	if len(args) > 2 {
+		return errors.New("bad args: expected `deny $user [$secret]`")
+	}
+	var secretKey string
+	if len(args) == 1 {
+		secretKey = "*"
+	} else {
+		secretKey = args[1]
+	}
+	username := Username(args[0])
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	secrets, err := shh.GetSecretsForUser(secretKey, username)
+	if err != nil {
+		return errors.Wrap(err, "get secrets for user")
+	}
+	userSecrets := shh.Secrets[username]
+	for key := range secrets {
+		delete(userSecrets, key)
+	}
+	if len(userSecrets) == 0 {
+		delete(shh.Secrets, username)
+	}
+	return shh.EncodeToPath(".shh")
+}
+
+// show
 
 // rotate
+
+// server? enable communication over a port to automatically decode vals.
+// perhaps automatically fork process to hold secrets in memory and kill self
+// after some time limit.
 
 func usage() {
 	fmt.Println(`usage:

@@ -15,10 +15,12 @@ import (
 )
 
 type User struct {
-	Username string
+	Username Username
 	Password []byte
 	Keys     *Keys
 }
+
+type Username string
 
 type Keys struct {
 	PublicKey       *rsa.PublicKey
@@ -78,7 +80,7 @@ func createUser(configPath string) (*User, error) {
 		return nil, errors.Wrap(err, "request password")
 	}
 	user := &User{
-		Username: username,
+		Username: Username(username),
 		Password: password,
 	}
 

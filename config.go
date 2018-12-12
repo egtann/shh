@@ -10,7 +10,7 @@ import (
 )
 
 type Config struct {
-	Username string
+	Username Username
 }
 
 func ConfigFromPath(pth string) (*Config, error) {
@@ -31,7 +31,7 @@ func ConfigFromPath(pth string) (*Config, error) {
 		parts[1] = strings.TrimSpace(parts[1])
 		switch parts[0] {
 		case "username":
-			config.Username = parts[1]
+			config.Username = Username(parts[1])
 		default:
 			return nil, fmt.Errorf("unknown part %s", parts[0])
 		}
