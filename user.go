@@ -112,18 +112,12 @@ func requestPassword() ([]byte, error) {
 		return nil, err
 	}
 	fmt.Print("\n")
-
-	// TODO(egtann) enable this before using
-	/*
-		if len(string(password)) < 24 {
-			// The goal is to make manual entry so inconvenient that it's
-			// never used. Use a password manager and a randomly generated
-			// password instead.
-			return nil, errors.New("password must be >= 24 chars")
-		}
-	*/
-
-	// TODO(egtann) validate password on private key and error out if bad
+	if len(string(password)) < 24 {
+		// The goal is to make manual entry so inconvenient that it's
+		// never used. Use a password manager and a randomly generated
+		// password instead.
+		return nil, errors.New("password must be >= 24 chars")
+	}
 	return password, nil
 }
 
