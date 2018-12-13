@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -46,6 +48,8 @@ func run() error {
 		return set(tail)
 	case "del":
 		return del(tail)
+	case "edit":
+		return edit(tail)
 	case "allow":
 		return allow(tail)
 	case "deny":
@@ -511,6 +515,115 @@ func deny(args []string) error {
 }
 
 // show
+
+// edit a secret using $EDITOR.
+func edit(args []string) error {
+	if len(args) > 1 {
+		return errors.New("bad args: expected `edit $secret`")
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	user, err := getUserWithPass(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+	user.Password, err = requestPassword("", false)
+	if err != nil {
+		return err
+	}
+	keys, err := getKeys(configPath, user.Password)
+	if err != nil {
+		return err
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	secrets, err := shh.GetSecretsForUser(args[0], user.Username)
+	if err != nil {
+		return err
+	}
+	if len(secrets) > 1 {
+		return errors.New("mulitple secrets found, cannot use *")
+	}
+
+	// Create tmp file
+	fi, err := ioutil.TempFile("", "shh")
+	if err != nil {
+		return errors.Wrap(err, "temp file")
+	}
+	defer fi.Close()
+
+	// Copy decrypted secret into tmp file
+	var plaintext, aesKey []byte
+	var key string
+	var secret Secret
+	for k, sec := range secrets {
+		key = k
+		secret = sec
+
+		// Decrypt the AES key using the private key
+		aesKey, err = rsa.DecryptOAEP(sha256.New(), rand.Reader,
+			keys.PrivateKey, []byte(sec.AESKey), nil)
+		if err != nil {
+			return errors.Wrap(err, "decrypt secret")
+		}
+
+		// Use the decrypted AES key to decrypt the secret
+		aesBlock, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+		if len(sec.Encrypted) < aes.BlockSize {
+			return errors.New("encrypted secret too short")
+		}
+		ciphertext := []byte(sec.Encrypted)
+		iv := ciphertext[:aes.BlockSize]
+		ciphertext = ciphertext[aes.BlockSize:]
+		stream := cipher.NewCFBDecrypter(aesBlock, iv)
+		plaintext = make([]byte, len(ciphertext))
+		stream.XORKeyStream(plaintext, []byte(ciphertext))
+	}
+	io.Copy(fi, bytes.NewReader(plaintext))
+
+	// Open tmp file in vim
+	cmd := exec.Command("bash", "-c", "$EDITOR "+fi.Name())
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	if err = cmd.Start(); err != nil {
+		return errors.Wrap(err, "cmd")
+	}
+	if err = cmd.Wait(); err != nil {
+		return errors.Wrap(err, "wait")
+	}
+
+	// Re-encrypt content
+	aesBlock, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return errors.Wrap(err, "new aes cipher")
+	}
+	plaintext, err = ioutil.ReadFile(fi.Name())
+	if err != nil {
+		return errors.Wrap(err, "read all")
+	}
+	encrypted := make([]byte, aes.BlockSize+len(plaintext))
+	iv := encrypted[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return errors.Wrap(err, "read iv")
+	}
+	stream := cipher.NewCFBEncrypter(aesBlock, iv)
+	stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
+
+	// Re-write the project file with the updated secret
+	shh.Secrets[user.Username][key] = Secret{
+		AESKey:    base64.StdEncoding.EncodeToString([]byte(secret.AESKey)),
+		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+	}
+	return shh.EncodeToPath(".shh")
+}
 
 // rotate generates new keys and re-encrypts all secrets using the new keys.
 // You should also use this to change your password.
