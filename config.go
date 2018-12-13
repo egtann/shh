@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -11,6 +12,7 @@ import (
 
 type Config struct {
 	Username Username
+	Port     int
 }
 
 func ConfigFromPath(pth string) (*Config, error) {
@@ -32,6 +34,11 @@ func ConfigFromPath(pth string) (*Config, error) {
 		switch parts[0] {
 		case "username":
 			config.Username = Username(parts[1])
+		case "port":
+			config.Port, err = strconv.Atoi(parts[1])
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid port %d", parts[1])
+			}
 		default:
 			return nil, fmt.Errorf("unknown part %s", parts[0])
 		}

@@ -17,6 +17,7 @@ import (
 type User struct {
 	Username Username
 	Password []byte
+	Port     int
 	Keys     *Keys
 }
 
@@ -44,6 +45,7 @@ func getUser(configPath string) (*User, error) {
 	}
 	u := &User{
 		Username: config.Username,
+		Port:     config.Port,
 		Keys:     keys,
 	}
 	return u, nil

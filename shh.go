@@ -99,7 +99,7 @@ func (s *Shh) GetSecretsForUser(key string, user Username) (map[string]Secret, e
 	}
 	glob := strings.Index(key, "*")
 	if glob == -1 {
-		return nil, errors.New("no secrets found")
+		return nil, errors.New("no secret found")
 	}
 	if glob < len(key)-1 {
 		return nil, errors.New("invalid glob: must be last character")

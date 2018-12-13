@@ -14,13 +14,18 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"time"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 )
+
+var serverBooted bool
 
 func main() {
 	if err := run(); err != nil {
@@ -60,6 +65,10 @@ func run() error {
 		return rmUser(tail)
 	case "rotate":
 		return rotate(tail)
+	case "serve":
+		return serve(tail)
+	case "login":
+		return login(tail)
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
 	}
@@ -789,9 +798,86 @@ func rmUser(args []string) error {
 	return shh.EncodeToPath(".shh")
 }
 
-// server? enable communication over a port to automatically decode vals.
-// perhaps automatically fork process to hold secrets in memory and kill self
-// after some time limit.
+// serve maintains the password in memory for an hour.
+func serve(args []string) error {
+	if len(args) > 0 {
+		return errors.New("bad args: expected none")
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+	var mu sync.Mutex
+	password := ""
+	if !serverBooted {
+		serverBooted = true
+		go func() {
+			for range time.Tick(time.Hour) {
+				mu.Lock()
+				password = ""
+				mu.Unlock()
+			}
+		}()
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		byt, err := ioutil.ReadAll(r.Body)
+		if len(byt) == 0 && err == nil {
+			err = errors.New("empty body")
+		}
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		mu.Lock()
+		password = string(byt)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	return http.ListenAndServe(fmt.Sprint(":", user.Port), mux)
+}
+
+// login to the server, caching the password in memory for 1 hour.
+func login(args []string) error {
+	if len(args) > 0 {
+		return errors.New("bad args: expected none")
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+	user.Password, err = requestPassword("", false)
+	if err != nil {
+		return errors.Wrap(err, "request password")
+	}
+
+	// Verify the password before continuing
+	if _, err = getKeys(configPath, user.Password); err != nil {
+		return err
+	}
+
+	buf := bytes.NewBuffer(user.Password)
+	resp, err := http.Post(fmt.Sprint("http://127.0.0.1:", user.Port), "plaintext", buf)
+	if err != nil {
+		return errors.Wrap(err, "new request")
+	}
+	if resp.StatusCode != 200 {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
 
 func copyFile(dst, src string) error {
 	srcFi, err := os.Open(src)
@@ -819,7 +905,7 @@ func copyFile(dst, src string) error {
 func usage() {
 	fmt.Println(`usage:
 
-	shh [command]
+	shh [flags] [command]
 
 global commands:
 
@@ -833,5 +919,6 @@ global commands:
 	show [$user]		show user's allowed and denied keys
 	rotate			rotate key
 	serve			start server to maintain password in memory
+	login			login to server to maintain password in memory
 `)
 }
