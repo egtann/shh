@@ -145,13 +145,9 @@ func initShh() error {
 
 // initShhCreateConfig adds an existing user to a new .shh file.
 func initShhCreateConfig(configPath string) error {
-	user, err := getUserWithPass(configPath)
+	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
-	}
-	user.Password, err = requestPassword("", false)
-	if err != nil {
-		return errors.Wrap(err, "request password")
 	}
 
 	// Retrieve shh, append the user's pub key, rewrite file
@@ -247,7 +243,7 @@ func get(args []string) error {
 	}
 	user.Password, err = requestPassword("", false)
 	if err != nil {
-		return errors.Wrap(err, "request password")
+		return err
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
@@ -408,7 +404,7 @@ func allow(args []string) error {
 	}
 	user.Password, err = requestPassword("", false)
 	if err != nil {
-		return errors.Wrap(err, "request password")
+		return err
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
