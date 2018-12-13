@@ -237,19 +237,19 @@ func get(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUserWithPass(configPath)
+	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
+	}
+	secrets, err := shh.GetSecretsForUser(secretName, user.Username)
+	if err != nil {
+		return err
 	}
 	user.Password, err = requestPassword("", false)
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
 	keys, err := getKeys(configPath, user.Password)
-	if err != nil {
-		return err
-	}
-	secrets, err := shh.GetSecretsForUser(secretName, user.Username)
 	if err != nil {
 		return err
 	}
