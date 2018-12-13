@@ -30,6 +30,7 @@ var serverBooted bool
 func main() {
 	if err := run(); err != nil {
 		fmt.Println("error: " + err.Error())
+		usage()
 		os.Exit(1)
 	}
 }
@@ -38,8 +39,7 @@ func run() error {
 	flag.Parse()
 	arg, tail := parseArg(flag.Args())
 	if arg == "" {
-		usage()
-		return nil
+		return errors.New("bad args")
 	}
 	switch arg {
 	case "init":
@@ -915,7 +915,7 @@ global commands:
 	allow $user $secret	allow user access to a secret
 	deny $user $secret	deny user access to a secret
 	add-user $user $pubkey  add user to project given their public key
-	rm-user	$user		remove user from project
+	rm-user $user		remove user from project
 	show [$user]		show user's allowed and denied keys
 	rotate			rotate key
 	serve			start server to maintain password in memory
