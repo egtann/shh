@@ -46,18 +46,28 @@ func getUser(configPath string) (*User, error) {
 		Username: config.Username,
 		Keys:     keys,
 	}
+	return u, nil
+}
+
+// getUserWithPass from the ~/.config/shh/config file. If the user already
+// exists in the project's shh key, this returns nil User and nil error.
+func getUserWithPass(configPath string) (*User, error) {
+	u, err := getUser(configPath)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check if the user already exists in the shh before continuing
 	shh, err := ShhFromPath(".shh")
 	if err != nil {
 		return nil, err
 	}
-	if _, exist := shh.Keys[config.Username]; exist {
+	if _, exist := shh.Keys[u.Username]; exist {
 		return u, nil
 	}
 
-	fmt.Printf("> adding user %s to project\n", config.Username)
-	u.Password, err = requestPassword()
+	fmt.Printf("> adding user %s to project\n", u.Username)
+	u.Password, err = requestPassword("", false)
 	if err != nil {
 		return nil, errors.Wrap(err, "request password")
 	}
@@ -75,7 +85,7 @@ func createUser(configPath string) (*User, error) {
 		return nil, errors.New("empty username")
 	}
 
-	password, err := requestPassword()
+	password, err := requestPassword("", true)
 	if err != nil {
 		return nil, errors.Wrap(err, "request password")
 	}
@@ -105,8 +115,14 @@ func createUser(configPath string) (*User, error) {
 	return user, nil
 }
 
-func requestPassword() ([]byte, error) {
-	fmt.Print("password: ")
+// requestPassword from user using the CLI. If prompt is empty, the default is
+// used.
+func requestPassword(prompt string, confirmPass bool) ([]byte, error) {
+	if prompt == "" {
+		fmt.Print("password: ")
+	} else {
+		fmt.Print(prompt + ": ")
+	}
 	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return nil, err
@@ -117,6 +133,17 @@ func requestPassword() ([]byte, error) {
 		// never used. Use a password manager and a randomly generated
 		// password instead.
 		return nil, errors.New("password must be >= 24 chars")
+	}
+	if confirmPass {
+		fmt.Print("confirm password: ")
+		password2, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			return nil, err
+		}
+		fmt.Print("\n")
+		if string(password) != string(password2) {
+			return nil, errors.New("passwords do not match")
+		}
 	}
 	return password, nil
 }

@@ -50,6 +50,12 @@ func run() error {
 		return allow(tail)
 	case "deny":
 		return deny(tail)
+	case "add-user":
+		return addUser(tail)
+	case "rm-user":
+		return rmUser(tail)
+	case "rotate":
+		return rotate(tail)
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
 	}
@@ -104,7 +110,7 @@ func initShh() error {
 	//
 	// TODO: do this on every action?
 	if configExists && secretExists {
-		user, err := getUser(configPath)
+		user, err := getUserWithPass(configPath)
 		if err != nil {
 			return errors.Wrap(err, "get user")
 		}
@@ -139,11 +145,11 @@ func initShh() error {
 
 // initShhCreateConfig adds an existing user to a new .shh file.
 func initShhCreateConfig(configPath string) error {
-	user, err := getUser(configPath)
+	user, err := getUserWithPass(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword()
+	user.Password, err = requestPassword("", false)
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
@@ -231,11 +237,11 @@ func get(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUser(configPath)
+	user, err := getUserWithPass(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword()
+	user.Password, err = requestPassword("", false)
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
@@ -289,7 +295,7 @@ func set(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUser(configPath)
+	user, err := getUserWithPass(configPath)
 	if err != nil {
 		return err
 	}
@@ -349,7 +355,7 @@ func del(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUser(configPath)
+	user, err := getUserWithPass(configPath)
 	if err != nil {
 		return err
 	}
@@ -396,11 +402,11 @@ func allow(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUser(configPath)
+	user, err := getUserWithPass(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword()
+	user.Password, err = requestPassword("", false)
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
@@ -460,7 +466,7 @@ func allow(args []string) error {
 
 		// Encrypt the AES key using the public key
 		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
-			pubKey, aesKey, []byte(key))
+			pubKey, aesKey, nil)
 		if err != nil {
 			return errors.Wrap(err, "reencrypt secret")
 		}
@@ -510,11 +516,196 @@ func deny(args []string) error {
 
 // show
 
-// rotate
+// rotate generates new keys and re-encrypts all secrets using the new keys.
+// You should also use this to change your password.
+func rotate(args []string) error {
+	if len(args) > 0 {
+		return errors.New("bad args: expected none")
+	}
+
+	// Allow changing the password
+	oldPass, err := requestPassword("old password", false)
+	if err != nil {
+		return errors.Wrap(err, "request old password")
+	}
+	newPass, err := requestPassword("new password", true)
+	if err != nil {
+		return errors.Wrap(err, "request new password")
+	}
+
+	home, err := homedir.Dir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".config", "shh")
+
+	// Generate new keys (different names). Note we do not use os.TempDir
+	// because we'll be renaming the files later, and we can't rename files
+	// across partitions (common for Linux)
+	tmpDir := filepath.Join(configPath, "tmp")
+	if err = os.Mkdir(tmpDir, 0777); err != nil {
+		return errors.Wrap(err, "make tmp dir")
+	}
+	defer func() {
+		os.RemoveAll(tmpDir)
+	}()
+
+	keys, err := createKeys(tmpDir, newPass)
+	if err != nil {
+		return errors.Wrap(err, "create keys")
+	}
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+
+	// Decrypt all AES secrets for user, re-encrypt with new key
+	oldKeys, err := getKeys(configPath, oldPass)
+	if err != nil {
+		return err
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	secrets := shh.Secrets[user.Username]
+	for key, secret := range secrets {
+		// Decrypt AES key using old key
+		byt, err := base64.StdEncoding.DecodeString(secret.AESKey)
+		if err != nil {
+			return errors.Wrap(err, "decode base64")
+		}
+		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
+			oldKeys.PrivateKey, byt, nil)
+		if err != nil {
+			return errors.Wrap(err, "decrypt secret")
+		}
+
+		// Re-encrypt using new public key
+		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
+			keys.PublicKey, aesKey, nil)
+		if err != nil {
+			return errors.Wrap(err, "reencrypt secret")
+		}
+		shh.Secrets[user.Username][key] = Secret{
+			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
+			Encrypted: secret.Encrypted,
+		}
+	}
+
+	// Update public key in project file
+	shh.Keys[user.Username] = keys.PublicKeyBlock
+
+	// First create backups of our existing keys
+	err = copyFile(
+		filepath.Join(configPath, "id_rsa.bak"),
+		filepath.Join(configPath, "id_rsa"),
+	)
+	if err != nil {
+		return errors.Wrap(err, "back up id_rsa")
+	}
+	err = copyFile(
+		filepath.Join(configPath, "id_rsa.pub.bak"),
+		filepath.Join(configPath, "id_rsa.pub"),
+	)
+	if err != nil {
+		return errors.Wrap(err, "back up id_rsa.pub")
+	}
+
+	// Rewrite the project file to use the new public key
+	if err = shh.EncodeToPath(".shh"); err != nil {
+		return errors.Wrap(err, "encode .shh")
+	}
+
+	// Move new keys on top of current keys in the filesystem
+	err = os.Rename(
+		filepath.Join(tmpDir, "id_rsa"),
+		filepath.Join(configPath, "id_rsa"),
+	)
+	if err != nil {
+		return errors.Wrap(err, "replace id_rsa")
+	}
+	err = os.Rename(
+		filepath.Join(tmpDir, "id_rsa.pub"),
+		filepath.Join(configPath, "id_rsa.pub"),
+	)
+	if err != nil {
+		return errors.Wrap(err, "replace id_rsa.pub")
+	}
+
+	// Delete our backed up keys
+	err = os.Remove(filepath.Join(configPath, "id_rsa.bak"))
+	if err != nil {
+		return errors.Wrap(err, "delete id_rsa.bak")
+	}
+	err = os.Remove(filepath.Join(configPath, "id_rsa.pub.bak"))
+	if err != nil {
+		return errors.Wrap(err, "delete id_rsa.pub.bak")
+	}
+	return nil
+}
+
+// addUser to project file.
+func addUser(args []string) error {
+	if len(args) != 2 {
+		return errors.New("bad args: expected `add-user $user $pubkey`")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	username := Username(args[0])
+	if _, exist := shh.Keys[username]; exist {
+		return nil
+	}
+	shh.Keys[username], _ = pem.Decode([]byte(args[1]))
+	return shh.EncodeToPath(".shh")
+}
+
+// rmUser from project file.
+func rmUser(args []string) error {
+	if len(args) != 1 {
+		return errors.New("bad args: expected `rm-user $user`")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	username := Username(args[0])
+	if _, exist := shh.Keys[username]; !exist {
+		return errors.New("user not found")
+	}
+	delete(shh.Keys, username)
+	delete(shh.Secrets, username)
+	return shh.EncodeToPath(".shh")
+}
 
 // server? enable communication over a port to automatically decode vals.
 // perhaps automatically fork process to hold secrets in memory and kill self
 // after some time limit.
+
+func copyFile(dst, src string) error {
+	srcFi, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFi.Close()
+
+	// Create the destination file with the same permissions as the source
+	// file
+	srcStat, err := srcFi.Stat()
+	if err != nil {
+		return err
+	}
+	dstFi, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE, srcStat.Mode())
+	if err != nil {
+		return err
+	}
+	defer dstFi.Close()
+
+	io.Copy(dstFi, srcFi)
+	return nil
+}
 
 func usage() {
 	fmt.Println(`usage:
@@ -528,7 +719,10 @@ global commands:
 	set $name $val		set secret
 	allow $user $secret	allow user access to a secret
 	deny $user $secret	deny user access to a secret
-	show $user		show user's allowed and denied keys
+	add-user $user $pubkey  add user to project given their public key
+	rm-user	$user		remove user from project
+	show [$user]		show user's allowed and denied keys
 	rotate			rotate key
+	serve			start server to maintain password in memory
 `)
 }
