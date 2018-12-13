@@ -254,7 +254,7 @@ func get(args []string) error {
 	if err != nil {
 		return err
 	}
-	user.Password, err = requestPassword("", false)
+	user.Password, err = requestPassword(user.Port, "", false)
 	if err != nil {
 		return err
 	}
@@ -415,7 +415,7 @@ func allow(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword("", false)
+	user.Password, err = requestPassword(user.Port, "", false)
 	if err != nil {
 		return err
 	}
@@ -539,7 +539,7 @@ func edit(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword("", false)
+	user.Password, err = requestPassword(user.Port, "", false)
 	if err != nil {
 		return err
 	}
@@ -642,11 +642,11 @@ func rotate(args []string) error {
 	}
 
 	// Allow changing the password
-	oldPass, err := requestPassword("old password", false)
+	oldPass, err := requestPassword(-1, "old password", false)
 	if err != nil {
 		return errors.Wrap(err, "request old password")
 	}
-	newPass, err := requestPassword("new password", true)
+	newPass, err := requestPassword(-1, "new password", true)
 	if err != nil {
 		return errors.Wrap(err, "request new password")
 	}
@@ -826,6 +826,10 @@ func serve(args []string) error {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.Write([]byte(password))
+			return
+		}
 		byt, err := ioutil.ReadAll(r.Body)
 		if len(byt) == 0 && err == nil {
 			err = errors.New("empty body")
@@ -857,7 +861,7 @@ func login(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword("", false)
+	user.Password, err = requestPassword(-1, "", false)
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
@@ -912,6 +916,7 @@ global commands:
 	init			initialize store or add self to existing store
 	get $name		get secret
 	set $name $val		set secret
+	del $name		delete a secret
 	allow $user $secret	allow user access to a secret
 	deny $user $secret	deny user access to a secret
 	add-user $user $pubkey  add user to project given their public key

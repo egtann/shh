@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -69,7 +70,7 @@ func getUserWithPass(configPath string) (*User, error) {
 	}
 
 	fmt.Printf("> adding user %s to project\n", u.Username)
-	u.Password, err = requestPassword("", false)
+	u.Password, err = requestPassword(u.Port, "", false)
 	if err != nil {
 		return nil, errors.Wrap(err, "request password")
 	}
@@ -87,7 +88,7 @@ func createUser(configPath string) (*User, error) {
 		return nil, errors.New("empty username")
 	}
 
-	password, err := requestPassword("", true)
+	password, err := requestPassword(-1, "", true)
 	if err != nil {
 		return nil, errors.Wrap(err, "request password")
 	}
@@ -119,13 +120,30 @@ func createUser(configPath string) (*User, error) {
 
 // requestPassword from user using the CLI. If prompt is empty, the default is
 // used.
-func requestPassword(prompt string, confirmPass bool) ([]byte, error) {
+func requestPassword(port int, prompt string, confirmPass bool) ([]byte, error) {
+	// Attempt to use the password from the server, if running. If any
+	// error, just ask for the password.
+	var password []byte
+	if !confirmPass && port > 0 {
+		resp, err := http.Get(fmt.Sprint("http://127.0.0.1:", port))
+		if err == nil {
+			defer resp.Body.Close()
+			password, err = ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return nil, errors.Wrap(err, "read all")
+			}
+		}
+		if len(password) > 0 {
+			return password, nil
+		}
+	}
 	if prompt == "" {
 		fmt.Print("password: ")
 	} else {
 		fmt.Print(prompt + ": ")
 	}
-	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	var err error
+	password, err = terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return nil, err
 	}
