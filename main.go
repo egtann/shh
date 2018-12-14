@@ -28,9 +28,14 @@ import (
 var serverBooted bool
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Println("error: " + err.Error())
-		usage()
+	err := run()
+	if err != nil {
+		switch err.(type) {
+		case emptyArgError:
+			usage()
+		default:
+			fmt.Println("error: " + err.Error())
+		}
 		os.Exit(1)
 	}
 }
@@ -39,7 +44,7 @@ func run() error {
 	flag.Parse()
 	arg, tail := parseArg(flag.Args())
 	if arg == "" {
-		return errors.New("bad args")
+		return emptyArgError{}
 	}
 	switch arg {
 	case "init":
@@ -86,7 +91,7 @@ func parseArg(args []string) (string, []string) {
 	}
 }
 
-// initShh handling 5 possible states:
+// initShh handles 5 possible states:
 //
 // 1. ~/.config/shh and .shh exist, and .shh has user (noop)
 // 2. ~/.config/shh and .shh exist, but .shh is missing user (add user to shh)
@@ -123,7 +128,7 @@ func initShh() error {
 	//
 	// TODO: do this on every action?
 	if configExists && secretExists {
-		user, err := getUserWithPass(configPath)
+		user, err := getUser(configPath)
 		if err != nil {
 			return errors.Wrap(err, "get user")
 		}
@@ -144,24 +149,25 @@ func initShh() error {
 
 	// State 3: first run in new project
 	if configExists && !secretExists {
-		return initShhCreateConfig(configPath)
+		return initShhCreateProject(configPath)
 	}
 
 	// State 4: first run in existing project
 	if !configExists && secretExists {
-		return initShhCreateUser(configPath)
+		return initShhCreateConfig(configPath)
 	}
 
 	// State 5: first ever run
 	return initShhCreateConfigAndUser(configPath)
 }
 
-// initShhCreateConfig adds an existing user to a new .shh file.
-func initShhCreateConfig(configPath string) error {
+// initShhCreateProject adds an existing user to a new .shh file.
+func initShhCreateProject(configPath string) error {
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
+	fmt.Printf("> creating project for user %s\n", user.Username)
 
 	// Retrieve shh, append the user's pub key, rewrite file
 	shh, err := ShhFromPath(".shh")
@@ -179,13 +185,14 @@ func initShhCreateConfig(configPath string) error {
 	return errors.Wrap(err, "encode to path")
 }
 
-// initShhCreateUser and add to an existing .shh file.
-func initShhCreateUser(configPath string) error {
+// initShhCreateConfig and add to an existing .shh file.
+func initShhCreateConfig(configPath string) error {
 	fmt.Println("> creating user for existing .shh")
 	user, err := createUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "create user")
 	}
+	backupReminder(false)
 
 	// Retrieve shh, append the user's pub key, rewrite file
 	pubKeyPath := filepath.Join(configPath, "id_rsa.pub")
@@ -209,6 +216,7 @@ func initShhCreateConfigAndUser(configPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "create user")
 	}
+	backupReminder(true)
 
 	// Create initial .shh file (600)
 	shh := NewShh()
@@ -304,7 +312,7 @@ func set(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUserWithPass(configPath)
+	user, err := getUser(configPath)
 	if err != nil {
 		return err
 	}
@@ -364,7 +372,7 @@ func del(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUserWithPass(configPath)
+	user, err := getUser(configPath)
 	if err != nil {
 		return err
 	}
@@ -411,7 +419,7 @@ func allow(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUserWithPass(configPath)
+	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
@@ -535,7 +543,7 @@ func edit(args []string) error {
 		return err
 	}
 	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUserWithPass(configPath)
+	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
@@ -760,6 +768,7 @@ func rotate(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "delete id_rsa.pub.bak")
 	}
+	backupReminder(false)
 	return nil
 }
 
@@ -922,8 +931,21 @@ global commands:
 	add-user $user $pubkey  add user to project given their public key
 	rm-user $user		remove user from project
 	show [$user]		show user's allowed and denied keys
+	edit			edit a secret using $EDITOR
 	rotate			rotate key
 	serve			start server to maintain password in memory
 	login			login to server to maintain password in memory
 `)
+}
+
+func backupReminder(withConfig bool) {
+	if withConfig {
+		fmt.Println("> generated ~/.config/shh/config")
+	}
+	fmt.Println("> generated ~/.config/shh/id_rsa")
+	fmt.Println("> generated ~/.config/shh/id_rsa.pub")
+	fmt.Println(">")
+	fmt.Println("> be sure to back up your ~/.config/shh/id_rsa and")
+	fmt.Println("> remember your password, or you may lose access to your")
+	fmt.Println("> secrets!")
 }

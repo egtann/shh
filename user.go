@@ -52,31 +52,6 @@ func getUser(configPath string) (*User, error) {
 	return u, nil
 }
 
-// getUserWithPass from the ~/.config/shh/config file. If the user already
-// exists in the project's shh key, this returns nil User and nil error.
-func getUserWithPass(configPath string) (*User, error) {
-	u, err := getUser(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if the user already exists in the shh before continuing
-	shh, err := ShhFromPath(".shh")
-	if err != nil {
-		return nil, err
-	}
-	if _, exist := shh.Keys[u.Username]; exist {
-		return u, nil
-	}
-
-	fmt.Printf("> adding user %s to project\n", u.Username)
-	u.Password, err = requestPassword(u.Port, "", false)
-	if err != nil {
-		return nil, errors.Wrap(err, "request password")
-	}
-	return u, nil
-}
-
 func createUser(configPath string) (*User, error) {
 	fmt.Print("username (usually email): ")
 	var username string
@@ -160,7 +135,6 @@ func requestPassword(port int, prompt string, confirmPass bool) ([]byte, error) 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Print("\n")
 		if string(password) != string(password2) {
 			return nil, errors.New("passwords do not match")
 		}

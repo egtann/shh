@@ -7,8 +7,11 @@ shh set $secret_name $value	# set value
 shh del $secret_name		# delete the secret
 shh allow $user $secret		# allow a user access to a secret
 shh deny $user $secret		# deny a user access to a secret
-shh show $user			# show user's allowed and denied keys. default self
+shh show [$user]		# show user's allowed and denied keys
+shh edit			# edit a secret using $EDITOR
 shh rotate			# rotate your key
+shh serve			# start a server to maintain password in memory
+shh login			# login to the server
 ```
 
 Example usage:
@@ -18,8 +21,9 @@ Example usage:
 shh init
 > creating new .shh
 >
-> your username (usually email): alice@example.com
-> password for your secrets key:
+> username (usually email): alice@example.com
+> password:
+> confirm password:
 >
 > generated ~/.config/shh/config
 > generated ~/.config/shh/id_rsa
@@ -34,7 +38,8 @@ shh init
 > adding user to existing .shh
 >
 > your username (usually email): bob@example.com
-> password for your secrets key:
+> password:
+> confirm password:
 >
 > generated ~/.config/shh/config
 > generated ~/.config/shh/id_rsa
@@ -45,15 +50,15 @@ shh init
 > may lose access to your secrets!
 
 # Create a secret named "database_url"
-shh create secret database_url "127.0.0.1:3304"
+shh set database_url $DATABASE_URL
 
-# An alternative syntax to create a secret
-echo $DB_URL | shh create secret database_url
+# An alternative syntax to set a secret from a file
+shh set very_secret "$(< secret.txt)"
 
 # You can also namespace the secrets like a filesystem. There's no built-in
 # support for this, but it makes it easy to support different projects/repos
 # within a single project.
-shh create secret staging/database_url "127.0.0.1:3304"
+shh set my_project/staging/database_url "127.0.0.1:3304"
 
 # Allow a user to access a secret
 shh allow bob@example.com database_url
@@ -61,8 +66,11 @@ shh allow bob@example.com database_url
 # Deny a user from accessing a secret
 shh deny bob@example.com database_url
 
-# Deny a user from accessing all secrets
-ssh deny bob@example.com *
+# Deny a user from accessing all secrets. The quotes are necessary
+shh deny bob@example.com "*"
+
+# Deny a user from accessing any secrets matching a glob pattern
+shh deny bob@example.com staging/*
 
 # Show your accessible keys and meta info
 shh show
@@ -71,12 +79,13 @@ shh show
 shh show user bob@example.com
 
 # Show all user keys and meta info
-shh show user *
+shh show user "*"
 
 # In case of stolen key, you can regenerate/rotate your key
 shh rotate
 > old password:
 > new password:
+> confirm password:
 >
 > generated ~/.config/shh/id_rsa
 > generated ~/.config/shh/id_rsa.pub
@@ -84,9 +93,6 @@ shh rotate
 > be sure to back up ~/.config/shh/id_rsa and remember your password, or you
 > may lose access to your secrets!
 
-# Pass staging secrets into server on boot
-shh show secret staging/* | my_server
-
-# Pass staging secrets to server.env on deploy
-shh show secret staging/* | ssh alice@server "cat > server.env"
+# Stream staging secrets to server.env on deploy
+shh get staging/env | ssh alice@staging "cat > server.env"
 ```
