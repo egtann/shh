@@ -4,9 +4,11 @@ Key commands
 shh init			# initialize project or add self to existing project
 shh get $secret_name		# get secret or secrets
 shh set $secret_name $value	# set value
-shh del $secret_name		# delete the secret
-shh allow $user $secret		# allow a user access to a secret
-shh deny $user $secret		# deny a user access to a secret
+shh del $secret_name		# delete secret
+shh allow $user $secret		# allow access to a secret
+shh deny $user $secret		# deny access to a secret
+shh add-user $user $pubkey	# add user to project
+shh rm-user $user		# remove user from project
 shh show [$user]		# show user's allowed and denied keys
 shh edit			# edit a secret using $EDITOR
 shh rotate			# rotate your key
