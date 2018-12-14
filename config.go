@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 )
 
@@ -15,10 +17,22 @@ type Config struct {
 	Port     int
 }
 
-func ConfigFromPath(pth string) (*Config, error) {
-	fi, err := os.Open(pth)
+func getConfigPath() (string, error) {
+	home, err := homedir.Dir()
 	if err != nil {
-		return nil, errors.Wrap(err, "open")
+		return "", err
+	}
+	return filepath.Join(home, ".config", "shh"), nil
+}
+
+func ConfigFromPath(pth string) (*Config, error) {
+	pth = filepath.Join(pth, "config")
+	fi, err := os.Open(pth)
+	if os.IsNotExist(err) {
+		return nil, errors.New("missing keys. run `shh gen-keys`")
+	}
+	if err != nil {
+		return nil, err
 	}
 	defer fi.Close()
 	config := &Config{}

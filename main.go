@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 )
 
@@ -46,12 +45,27 @@ func run() error {
 	if arg == "" {
 		return emptyArgError{}
 	}
+
+	// Enforce that a .shh file exists for anything for most commands
+	switch arg {
+	case "init", "gen-keys": // Do nothing
+	default:
+		_, err := os.Stat(".shh")
+		if os.IsNotExist(err) {
+			return errors.New("missing .shh, run `shh init`")
+		}
+		if err != nil {
+			return err
+		}
+	}
 	switch arg {
 	case "init":
 		if tail != nil {
 			return fmt.Errorf("unknown args: %v", tail)
 		}
 		return initShh()
+	case "gen-keys":
+		return genKeys(tail)
 	case "get":
 		return get(tail)
 	case "set":
@@ -91,150 +105,47 @@ func parseArg(args []string) (string, []string) {
 	}
 }
 
-// initShh handles 5 possible states:
-//
-// 1. ~/.config/shh and .shh exist, and .shh has user (noop)
-// 2. ~/.config/shh and .shh exist, but .shh is missing user (add user to shh)
-// 3. ~/.config/shh exists, but .shh does not (first run in new project)
-// 4. ~/.config/shh does not exist, but .shh does (first run in existing project)
-// 5. ~/.config/shh and .shh are both missing (first run ever)
-func initShh() error {
-	home, err := homedir.Dir()
+// genKeys for self in ~/.config/shh.
+func genKeys(args []string) error {
+	if len(args) > 0 {
+		return errors.New("bad args: expected none")
+	}
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-
-	// Check for existence of config folder
-	configExists := true
-	configPath := filepath.Join(home, ".config", "shh")
-	_, err = os.Stat(configPath)
-	if os.IsNotExist(err) {
-		configExists = false
-	} else if err != nil {
+	_, err = ConfigFromPath(configPath)
+	if err == nil {
+		return errors.New("keys exist at ~/.config/shh, run `shh rotate` to change keys")
+	}
+	fmt.Println("ERR", err.Error())
+	if _, err = createUser(configPath); err != nil {
 		return err
 	}
-
-	// Check for existence of .shh secrets file
-	secretExists := true
-	_, err = os.Stat(".shh")
-	if os.IsNotExist(err) {
-		secretExists = false
-	} else if err != nil {
-		return err
-	}
-
-	// Check if user exists in secret file if we have a config. If not, we
-	// add the user to the file before continuing
-	//
-	// TODO: do this on every action?
-	if configExists && secretExists {
-		user, err := getUser(configPath)
-		if err != nil {
-			return errors.Wrap(err, "get user")
-		}
-		shh, err := ShhFromPath(".shh")
-		if err != nil {
-			return err
-		}
-		if _, exist := shh.Keys[user.Username]; exist {
-			// State 1: noop
-			return nil
-		}
-
-		// State 2: .shh exists but is missing user.
-		// Add user to .shh
-		shh.Keys[user.Username] = user.Keys.PublicKeyBlock
-		return shh.EncodeToPath(".shh")
-	}
-
-	// State 3: first run in new project
-	if configExists && !secretExists {
-		return initShhCreateProject(configPath)
-	}
-
-	// State 4: first run in existing project
-	if !configExists && secretExists {
-		return initShhCreateConfig(configPath)
-	}
-
-	// State 5: first ever run
-	return initShhCreateConfigAndUser(configPath)
+	backupReminder(true)
+	return nil
 }
 
-// initShhCreateProject adds an existing user to a new .shh file.
-func initShhCreateProject(configPath string) error {
+// initShh creates your project file ".shh". If the project file already
+// exists or if keys have not been generated, initShh reports an error.
+func initShh() error {
+	if _, err := os.Stat(".shh"); err == nil {
+		return errors.New(".shh already exists")
+	}
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	fmt.Printf("> creating project for user %s\n", user.Username)
-
-	// Retrieve shh, append the user's pub key, rewrite file
 	shh, err := ShhFromPath(".shh")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "shh from path")
 	}
-	pubKeyPath := filepath.Join(configPath, "id_rsa.pub")
-	pubKeyData, err := ioutil.ReadFile(pubKeyPath)
-	if err != nil {
-		return errors.Wrap(err, "read")
-	}
-	block, _ := pem.Decode(pubKeyData)
-	shh.Keys[user.Username] = block
-	err = shh.EncodeToPath(".shh")
-	return errors.Wrap(err, "encode to path")
-}
-
-// initShhCreateConfig and add to an existing .shh file.
-func initShhCreateConfig(configPath string) error {
-	fmt.Println("> creating user for existing .shh")
-	user, err := createUser(configPath)
-	if err != nil {
-		return errors.Wrap(err, "create user")
-	}
-	backupReminder(false)
-
-	// Retrieve shh, append the user's pub key, rewrite file
-	pubKeyPath := filepath.Join(configPath, "id_rsa.pub")
-	pubKeyData, err := ioutil.ReadFile(pubKeyPath)
-	if err != nil {
-		return errors.Wrap(err, "read")
-	}
-	block, _ := pem.Decode(pubKeyData)
-	shh, err := ShhFromPath(".shh")
-	if err != nil {
-		return err
-	}
-	shh.Keys[user.Username] = block
-	err = shh.EncodeToPath(".shh")
-	return errors.Wrap(err, "encode to path")
-}
-
-func initShhCreateConfigAndUser(configPath string) error {
-	fmt.Println("> creating new .shh")
-	user, err := createUser(configPath)
-	if err != nil {
-		return errors.Wrap(err, "create user")
-	}
-	backupReminder(true)
-
-	// Create initial .shh file (600)
-	shh := NewShh()
 	shh.Keys[user.Username] = user.Keys.PublicKeyBlock
-	if err = shh.EncodeToPath(".shh"); err != nil {
-		return err
-	}
-	return nil
-}
-
-func getPublicKeyBlock(pth string) (*pem.Block, error) {
-	keyPath := filepath.Join(pth, "id_rsa.pub")
-	byt, err := ioutil.ReadFile(keyPath)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(byt)
-	return block, nil
+	return shh.EncodeToPath(".shh")
 }
 
 // TODO enforce 600 permissions on id_rsa file and .shh when any command is run
@@ -245,18 +156,17 @@ func get(args []string) error {
 		return errors.New("bad args: expected `get $name`")
 	}
 	secretName := args[0]
-	shh, err := ShhFromPath(".shh")
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	home, err := homedir.Dir()
-	if err != nil {
-		return err
-	}
-	configPath := filepath.Join(home, ".config", "shh")
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
 	}
 	secrets, err := shh.GetSecretsForUser(secretName, user.Username)
 	if err != nil {
@@ -303,16 +213,15 @@ func set(args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `set $name $val`")
 	}
-	shh, err := ShhFromPath(".shh")
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	home, err := homedir.Dir()
-	if err != nil {
-		return err
-	}
-	configPath := filepath.Join(home, ".config", "shh")
 	user, err := getUser(configPath)
+	if err != nil {
+		return err
+	}
+	shh, err := ShhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -363,16 +272,15 @@ func del(args []string) error {
 		return errors.New("bad args: expected `del $secret`")
 	}
 	secret := args[0]
-	shh, err := ShhFromPath(".shh")
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	home, err := homedir.Dir()
-	if err != nil {
-		return err
-	}
-	configPath := filepath.Join(home, ".config", "shh")
 	user, err := getUser(configPath)
+	if err != nil {
+		return err
+	}
+	shh, err := ShhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -398,15 +306,23 @@ func allow(args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `allow $user $secret`")
 	}
+	username := Username(args[0])
+	secretKey := args[1]
+	configPath, err := getConfigPath()
+	if err != nil {
+		return errors.Wrap(err, "get config path")
+	}
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
 	shh, err := ShhFromPath(".shh")
 	if err != nil {
 		return err
 	}
-	username := Username(args[0])
-	secretKey := args[1]
 	block, exist := shh.Keys[username]
 	if !exist {
-		return fmt.Errorf("%s is not in the project", username)
+		return fmt.Errorf("%q is not a user in the project. try `shh add-user %s $PUBKEY`", username, username)
 	}
 	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
@@ -414,15 +330,6 @@ func allow(args []string) error {
 	}
 
 	// Decrypt all matching secrets
-	home, err := homedir.Dir()
-	if err != nil {
-		return err
-	}
-	configPath := filepath.Join(home, ".config", "shh")
-	user, err := getUser(configPath)
-	if err != nil {
-		return errors.Wrap(err, "get user")
-	}
 	user.Password, err = requestPassword(user.Port, "", false)
 	if err != nil {
 		return err
@@ -538,11 +445,10 @@ func edit(args []string) error {
 	if len(args) > 1 {
 		return errors.New("bad args: expected `edit $secret`")
 	}
-	home, err := homedir.Dir()
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(home, ".config", "shh")
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
@@ -659,11 +565,10 @@ func rotate(args []string) error {
 		return errors.Wrap(err, "request new password")
 	}
 
-	home, err := homedir.Dir()
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(home, ".config", "shh")
 
 	// Generate new keys (different names). Note we do not use os.TempDir
 	// because we'll be renaming the files later, and we can't rename files
@@ -774,14 +679,28 @@ func rotate(args []string) error {
 
 // addUser to project file.
 func addUser(args []string) error {
-	if len(args) != 2 {
-		return errors.New("bad args: expected `add-user $user $pubkey`")
+	if len(args) != 0 && len(args) != 2 {
+		return errors.New("bad args: expected `add-user [$user $pubkey]`")
 	}
 	shh, err := ShhFromPath(".shh")
 	if err != nil {
 		return err
 	}
-	username := Username(args[0])
+	var username Username
+	if len(args) == 0 {
+		// Default to self
+		configPath, err := getConfigPath()
+		if err != nil {
+			return err
+		}
+		user, err := getUser(configPath)
+		if err != nil {
+			return errors.Wrap(err, "get user")
+		}
+		username = user.Username
+	} else {
+		username = Username(args[0])
+	}
 	if _, exist := shh.Keys[username]; exist {
 		return nil
 	}
@@ -812,11 +731,10 @@ func serve(args []string) error {
 	if len(args) > 0 {
 		return errors.New("bad args: expected none")
 	}
-	home, err := homedir.Dir()
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(home, ".config", "shh")
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
@@ -861,11 +779,10 @@ func login(args []string) error {
 	if len(args) > 0 {
 		return errors.New("bad args: expected none")
 	}
-	home, err := homedir.Dir()
+	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(home, ".config", "shh")
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")

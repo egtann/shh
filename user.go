@@ -34,10 +34,9 @@ type Keys struct {
 // getUser from the ~/.config/shh/config file. If the user already exists in
 // the project's shh key, this returns nil User and nil error.
 func getUser(configPath string) (*User, error) {
-	configFilePath := filepath.Join(configPath, "config")
-	config, err := ConfigFromPath(configFilePath)
+	config, err := ConfigFromPath(configPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "read %s", configFilePath)
+		return nil, err
 	}
 
 	keys, err := getPublicKey(configPath)
@@ -138,6 +137,7 @@ func requestPassword(port int, prompt string, confirmPass bool) ([]byte, error) 
 		if string(password) != string(password2) {
 			return nil, errors.New("passwords do not match")
 		}
+		fmt.Print("\n")
 	}
 	return password, nil
 }
