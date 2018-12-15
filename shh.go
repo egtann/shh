@@ -48,7 +48,7 @@ func ShhFromPath(pth string) (*Shh, error) {
 		// We newly created the file. Not an error, just an empty .shh
 		return shh, nil
 	}
-	return shh, errors.Wrap(err, "decode")
+	return shh, errors.Wrap(err, "decode shh")
 }
 
 func (s *Shh) EncodeToPath(pth string) error {

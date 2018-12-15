@@ -118,7 +118,6 @@ func genKeys(args []string) error {
 	if err == nil {
 		return errors.New("keys exist at ~/.config/shh, run `shh rotate` to change keys")
 	}
-	fmt.Println("ERR", err.Error())
 	if _, err = createUser(configPath); err != nil {
 		return err
 	}
@@ -686,25 +685,28 @@ func addUser(args []string) error {
 	if err != nil {
 		return err
 	}
-	var username Username
+	var user *User
 	if len(args) == 0 {
 		// Default to self
 		configPath, err := getConfigPath()
 		if err != nil {
 			return err
 		}
-		user, err := getUser(configPath)
+		user, err = getUser(configPath)
 		if err != nil {
 			return errors.Wrap(err, "get user")
 		}
-		username = user.Username
 	} else {
-		username = Username(args[0])
+		user = &User{Username: Username(args[0])}
 	}
-	if _, exist := shh.Keys[username]; exist {
+	if _, exist := shh.Keys[user.Username]; exist {
 		return nil
 	}
-	shh.Keys[username], _ = pem.Decode([]byte(args[1]))
+	if len(args) == 0 {
+		shh.Keys[user.Username] = user.Keys.PublicKeyBlock
+	} else {
+		shh.Keys[user.Username], _ = pem.Decode([]byte(args[1]))
+	}
 	return shh.EncodeToPath(".shh")
 }
 
@@ -744,6 +746,7 @@ func serve(args []string) error {
 	if !serverBooted {
 		serverBooted = true
 		go func() {
+			// TODO reset timer on each login
 			for range time.Tick(time.Hour) {
 				mu.Lock()
 				password = ""
