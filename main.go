@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -88,6 +89,8 @@ func run() error {
 		return serve(tail)
 	case "login":
 		return login(tail)
+	case "show":
+		return show(tail)
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
 	}
@@ -107,7 +110,7 @@ func parseArg(args []string) (string, []string) {
 
 // genKeys for self in ~/.config/shh.
 func genKeys(args []string) error {
-	if len(args) > 0 {
+	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
 	configPath, err := getConfigPath()
@@ -437,7 +440,53 @@ func deny(args []string) error {
 	return shh.EncodeToPath(".shh")
 }
 
-// show
+// show users and secrets which they can access.
+func show(args []string) error {
+	if len(args) > 1 {
+		return errors.New("bad args: expected `show [$user]`")
+	}
+	shh, err := ShhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		return showAll(shh)
+	}
+	return showUser(shh, Username(args[0]))
+}
+
+// showAll users and secrets alongside a summary.
+func showAll(shh *Shh) error {
+	secrets := shh.AllSecrets()
+	fmt.Println("====== SUMMARY ======")
+	fmt.Printf("%d users\n", len(shh.Keys))
+	fmt.Printf("%d secrets\n", len(secrets))
+	fmt.Printf("\n")
+	fmt.Printf("======= USERS =======")
+	usernames := []string{}
+	for username := range shh.Keys {
+		usernames = append(usernames, string(username))
+	}
+	sort.Strings(usernames)
+	for _, username := range usernames {
+		userSecrets := shh.Secrets[Username(username)]
+		fmt.Printf("\n%s (%d secrets)\n", username, len(userSecrets))
+		for secretName := range userSecrets {
+			fmt.Printf("> %s\n", secretName)
+		}
+	}
+	return nil
+}
+
+// showUser secrets.
+func showUser(shh *Shh, username Username) error {
+	secrets := shh.Secrets[username]
+	fmt.Printf("%d secrets\n", len(secrets))
+	for secretName := range secrets {
+		fmt.Printf("> %s\n", secretName)
+	}
+	return nil
+}
 
 // edit a secret using $EDITOR.
 func edit(args []string) error {
@@ -550,7 +599,7 @@ func edit(args []string) error {
 // rotate generates new keys and re-encrypts all secrets using the new keys.
 // You should also use this to change your password.
 func rotate(args []string) error {
-	if len(args) > 0 {
+	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
 
@@ -730,7 +779,7 @@ func rmUser(args []string) error {
 
 // serve maintains the password in memory for an hour.
 func serve(args []string) error {
-	if len(args) > 0 {
+	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
 	configPath, err := getConfigPath()
@@ -779,7 +828,7 @@ func serve(args []string) error {
 
 // login to the server, caching the password in memory for 1 hour.
 func login(args []string) error {
-	if len(args) > 0 {
+	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
 	configPath, err := getConfigPath()

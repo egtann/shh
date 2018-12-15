@@ -124,3 +124,17 @@ func (s *Shh) GetSecretsForUser(key string, user Username) (map[string]Secret, e
 	}
 	return matches, nil
 }
+
+func (s *Shh) AllSecrets() []string {
+	seen := map[string]struct{}{}
+	for _, userSecrets := range s.Secrets {
+		for name := range userSecrets {
+			seen[name] = struct{}{}
+		}
+	}
+	secrets := []string{}
+	for name := range seen {
+		secrets = append(secrets, name)
+	}
+	return secrets
+}
