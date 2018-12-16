@@ -49,7 +49,7 @@ func run() error {
 
 	// Enforce that a .shh file exists for anything for most commands
 	switch arg {
-	case "init", "gen-keys": // Do nothing
+	case "init", "gen-keys", "serve": // Do nothing
 	default:
 		_, err := os.Stat(".shh")
 		if os.IsNotExist(err) {
