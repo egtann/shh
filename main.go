@@ -92,7 +92,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.0")
+		fmt.Println("1.0.1")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -758,6 +758,9 @@ func addUser(args []string) error {
 		shh.Keys[user.Username] = user.Keys.PublicKeyBlock
 	} else {
 		shh.Keys[user.Username], _ = pem.Decode([]byte(args[1]))
+		if shh.Keys[user.Username] == nil {
+			return errors.New("bad public key")
+		}
 	}
 	return shh.EncodeToPath(".shh")
 }
