@@ -141,6 +141,8 @@ shh edit			# edit secret using $EDITOR
 shh rotate			# rotate your key
 shh serve			# start server to maintain password in memory
 shh login			# login to server
+shh version			# version info
+shh help			# usage info
 ```
 
 ## Example usage:

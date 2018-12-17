@@ -43,13 +43,13 @@ func main() {
 func run() error {
 	flag.Parse()
 	arg, tail := parseArg(flag.Args())
-	if arg == "" {
+	if arg == "" || arg == "help" {
 		return emptyArgError{}
 	}
 
 	// Enforce that a .shh file exists for anything for most commands
 	switch arg {
-	case "init", "gen-keys", "serve": // Do nothing
+	case "init", "gen-keys", "serve", "version": // Do nothing
 	default:
 		_, err := os.Stat(".shh")
 		if os.IsNotExist(err) {
@@ -91,6 +91,9 @@ func run() error {
 		return login(tail)
 	case "show":
 		return show(tail)
+	case "version":
+		fmt.Println("1.0.0")
+		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
 	}
@@ -904,6 +907,8 @@ global commands:
 	rotate			rotate key
 	serve			start server to maintain password in memory
 	login			login to server to maintain password in memory
+	version			version information
+	help			usage info
 `)
 }
 
