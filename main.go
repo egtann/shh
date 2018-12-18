@@ -92,7 +92,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.1")
+		fmt.Println("1.0.2")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -377,6 +377,10 @@ func allow(args []string) error {
 		if _, err := rand.Read(aesKey); err != nil {
 			return err
 		}
+		aesBlock, err = aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
 
 		// Encrypt the secret using the new AES key
 		encrypted := make([]byte, aes.BlockSize+len(plaintext))
@@ -386,12 +390,6 @@ func allow(args []string) error {
 		}
 		stream = cipher.NewCFBEncrypter(aesBlock, iv)
 		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
-
-		// Encrypt the secret using that AES key
-		aesBlock, err = aes.NewCipher(aesKey)
-		if err != nil {
-			return err
-		}
 
 		// Encrypt the AES key using the public key
 		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,

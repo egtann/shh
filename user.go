@@ -227,7 +227,7 @@ func getKeys(pth string, password []byte) (*Keys, error) {
 	keys := &Keys{}
 	keys.PrivateKeyBlock, _ = pem.Decode(byt)
 	if keys.PrivateKeyBlock == nil || keys.PrivateKeyBlock.Type != "RSA PRIVATE KEY" {
-		return nil, errors.New("failed to decode pem block for private key")
+		return nil, errors.New("failed to decode pem block for encrypted private key")
 	}
 	byt, err = x509.DecryptPEMBlock(keys.PrivateKeyBlock, password)
 	if err != nil {
