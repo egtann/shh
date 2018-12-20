@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -34,7 +35,29 @@ func NewShh() *Shh {
 	}
 }
 
+// findShhRecursive checks for a file recursively up the filesystem until it
+// hits an error.
+func findShhRecursive(pth string) (string, error) {
+	abs, err := filepath.Abs(pth)
+	if err != nil {
+		return "", errors.Wrap(err, "abs")
+	}
+	if abs == string(filepath.Separator)+filepath.Base(pth) {
+		// We hit the root, we're done
+		return "", os.ErrNotExist
+	}
+	_, err = os.Stat(pth)
+	if os.IsNotExist(err) {
+		return findShhRecursive(filepath.Join("..", pth))
+	}
+	return pth, errors.Wrap(err, "stat")
+}
+
 func ShhFromPath(pth string) (*Shh, error) {
+	pth, err := findShhRecursive(pth)
+	if err != nil {
+		return nil, err
+	}
 	flags := os.O_CREATE | os.O_RDWR
 	fi, err := os.OpenFile(pth, flags, 0644)
 	if err != nil {

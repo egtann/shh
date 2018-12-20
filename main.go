@@ -51,7 +51,7 @@ func run() error {
 	switch arg {
 	case "init", "gen-keys", "serve", "version": // Do nothing
 	default:
-		_, err := os.Stat(".shh")
+		_, err := findShhRecursive(".shh")
 		if os.IsNotExist(err) {
 			return errors.New("missing .shh, run `shh init`")
 		}
@@ -92,7 +92,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.2")
+		fmt.Println("1.0.3")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
