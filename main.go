@@ -6,9 +6,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -92,7 +94,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.3")
+		fmt.Println("1.0.4")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -561,6 +563,12 @@ func edit(args []string) error {
 	}
 	io.Copy(fi, bytes.NewReader(plaintext))
 
+	// Checksum the plaintext, so we can exit early if nothing changed
+	// (i.e. don't re-encrypt on saves without changes)
+	h := sha1.New()
+	h.Write(plaintext)
+	origHash := hex.EncodeToString(h.Sum(nil))
+
 	// Open tmp file in vim
 	cmd := exec.Command("bash", "-c", "$EDITOR "+fi.Name())
 	cmd.Stdout = os.Stdout
@@ -581,6 +589,15 @@ func edit(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "read all")
 	}
+
+	// Check if the contents have changed. If not, we can exit early
+	h = sha1.New()
+	h.Write(plaintext)
+	newHash := hex.EncodeToString(h.Sum(nil))
+	if origHash == newHash {
+		return nil
+	}
+
 	encrypted := make([]byte, aes.BlockSize+len(plaintext))
 	iv := encrypted[:aes.BlockSize]
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
