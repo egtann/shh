@@ -94,7 +94,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.4")
+		fmt.Println("1.0.5")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -152,7 +152,7 @@ func initShh() error {
 		return errors.Wrap(err, "shh from path")
 	}
 	shh.Keys[user.Username] = user.Keys.PublicKeyBlock
-	return shh.EncodeToPath(".shh")
+	return shh.EncodeToFile()
 }
 
 // TODO enforce 600 permissions on id_rsa file and .shh when any command is run
@@ -269,7 +269,7 @@ func set(args []string) error {
 		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
 	}
 	shh.Secrets[user.Username][args[0]] = sec
-	err = shh.EncodeToPath(".shh")
+	err = shh.EncodeToFile()
 	return errors.Wrap(err, "encode to path")
 }
 
@@ -302,7 +302,7 @@ func del(args []string) error {
 	if len(userSecrets) == 0 {
 		delete(shh.Secrets, user.Username)
 	}
-	err = shh.EncodeToPath(".shh")
+	err = shh.EncodeToFile()
 	return errors.Wrap(err, "encode to path")
 }
 
@@ -410,7 +410,7 @@ func allow(args []string) error {
 		// Add encrypted data and key to .shh
 		shh.Secrets[username][key] = sec
 	}
-	return shh.EncodeToPath(".shh")
+	return shh.EncodeToFile()
 }
 
 // deny a user from accessing secrets.
@@ -440,7 +440,7 @@ func deny(args []string) error {
 	if len(userSecrets) == 0 {
 		delete(shh.Secrets, username)
 	}
-	return shh.EncodeToPath(".shh")
+	return shh.EncodeToFile()
 }
 
 // show users and secrets which they can access.
@@ -611,7 +611,7 @@ func edit(args []string) error {
 		AESKey:    base64.StdEncoding.EncodeToString([]byte(secret.AESKey)),
 		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
 	}
-	return shh.EncodeToPath(".shh")
+	return shh.EncodeToFile()
 }
 
 // rotate generates new keys and re-encrypts all secrets using the new keys.
@@ -710,7 +710,7 @@ func rotate(args []string) error {
 	}
 
 	// Rewrite the project file to use the new public key
-	if err = shh.EncodeToPath(".shh"); err != nil {
+	if err = shh.EncodeToFile(); err != nil {
 		return errors.Wrap(err, "encode .shh")
 	}
 
@@ -777,7 +777,7 @@ func addUser(args []string) error {
 			return errors.New("bad public key")
 		}
 	}
-	return shh.EncodeToPath(".shh")
+	return shh.EncodeToFile()
 }
 
 // rmUser from project file.
@@ -795,7 +795,7 @@ func rmUser(args []string) error {
 	}
 	delete(shh.Keys, username)
 	delete(shh.Secrets, username)
-	return shh.EncodeToPath(".shh")
+	return shh.EncodeToFile()
 }
 
 // serve maintains the password in memory for an hour.
@@ -926,8 +926,7 @@ global commands:
 	serve			start server to maintain password in memory
 	login			login to server to maintain password in memory
 	version			version information
-	help			usage info
-`)
+	help			usage info`)
 }
 
 func backupReminder(withConfig bool) {

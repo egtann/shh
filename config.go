@@ -51,7 +51,7 @@ func ConfigFromPath(pth string) (*Config, error) {
 		case "port":
 			config.Port, err = strconv.Atoi(parts[1])
 			if err != nil {
-				return nil, errors.Wrapf(err, "invalid port %d", parts[1])
+				return nil, errors.Wrapf(err, "invalid port %s", parts[1])
 			}
 		default:
 			return nil, fmt.Errorf("unknown part %s", parts[0])

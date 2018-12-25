@@ -13,14 +13,15 @@ import (
 )
 
 type Shh struct {
-	file string
-
 	// Secrets maps users -> secret_labels -> secret_value. Each secret is
 	// uniquely encrypted for each user given their public key.
 	Secrets map[Username]map[string]Secret `json:"secrets"`
 
 	// Keys are public keys used to encrypt secrets for each user.
 	Keys map[Username]*pem.Block `json:"keys"`
+
+	// path of the .shh file itself.
+	path string
 }
 
 type Secret struct {
@@ -28,8 +29,9 @@ type Secret struct {
 	Encrypted string `json:"value"`
 }
 
-func NewShh() *Shh {
+func NewShh(path string) *Shh {
 	return &Shh{
+		path:    path,
 		Secrets: map[Username]map[string]Secret{},
 		Keys:    map[Username]*pem.Block{},
 	}
@@ -64,7 +66,7 @@ func ShhFromPath(pth string) (*Shh, error) {
 		return nil, err
 	}
 	defer fi.Close()
-	shh := NewShh()
+	shh := NewShh(pth)
 	dec := json.NewDecoder(fi)
 	err = dec.Decode(shh)
 	if err == io.EOF {
@@ -74,9 +76,9 @@ func ShhFromPath(pth string) (*Shh, error) {
 	return shh, errors.Wrap(err, "decode shh")
 }
 
-func (s *Shh) EncodeToPath(pth string) error {
+func (s *Shh) EncodeToFile() error {
 	flags := os.O_TRUNC | os.O_CREATE | os.O_WRONLY
-	fi, err := os.OpenFile(pth, flags, 0644)
+	fi, err := os.OpenFile(s.path, flags, 0644)
 	if err != nil {
 		return err
 	}
