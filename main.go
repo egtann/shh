@@ -94,7 +94,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.5")
+		fmt.Println("1.0.6")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -210,7 +210,7 @@ func get(args []string) error {
 		stream := cipher.NewCFBDecrypter(aesBlock, iv)
 		plaintext := make([]byte, len(ciphertext))
 		stream.XORKeyStream(plaintext, []byte(ciphertext))
-		fmt.Println(string(plaintext))
+		fmt.Printf(string(plaintext))
 	}
 	return nil
 }
