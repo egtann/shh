@@ -15,6 +15,8 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
+const defaultPasswordPrompt = "password"
+
 type User struct {
 	Username Username
 	Password []byte
@@ -62,7 +64,7 @@ func createUser(configPath string) (*User, error) {
 		return nil, errors.New("empty username")
 	}
 
-	password, err := requestPassword(-1, "", true)
+	password, err := requestPasswordAndConfirm(defaultPasswordPrompt)
 	if err != nil {
 		return nil, errors.Wrap(err, "request password")
 	}
@@ -92,32 +94,41 @@ func createUser(configPath string) (*User, error) {
 	return user, nil
 }
 
+// requestPasswordFromServer and report an error if no password can be
+// retrieved.
+func requestPasswordFromServer(port int, resetTimer bool) ([]byte, error) {
+	url := fmt.Sprint("http://127.0.0.1:", port)
+	if resetTimer {
+		url += "/reset-timer"
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	password, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "read all")
+	}
+	if len(password) == 0 {
+		return nil, errors.New("cached password not available. run `shh login`")
+	}
+	return password, nil
+}
+
 // requestPassword from user using the CLI. If prompt is empty, the default is
-// used.
-func requestPassword(port int, prompt string, confirmPass bool) ([]byte, error) {
+// used. This attempts to retrieve the password from the server if configured.
+func requestPassword(port int, prompt string) ([]byte, error) {
 	// Attempt to use the password from the server, if running. If any
 	// error, just ask for the password.
-	var password []byte
-	if !confirmPass && port > 0 {
-		resp, err := http.Get(fmt.Sprint("http://127.0.0.1:", port))
+	if port > 0 {
+		password, err := requestPasswordFromServer(port, false)
 		if err == nil {
-			defer resp.Body.Close()
-			password, err = ioutil.ReadAll(resp.Body)
-			if err != nil {
-				return nil, errors.Wrap(err, "read all")
-			}
-		}
-		if len(password) > 0 {
 			return password, nil
 		}
 	}
-	if prompt == "" {
-		fmt.Print("password: ")
-	} else {
-		fmt.Print(prompt + ": ")
-	}
-	var err error
-	password, err = terminal.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Print(prompt + ": ")
+	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return nil, err
 	}
@@ -128,17 +139,31 @@ func requestPassword(port int, prompt string, confirmPass bool) ([]byte, error) 
 		// password instead.
 		return nil, errors.New("password must be >= 24 chars")
 	}
-	if confirmPass {
-		fmt.Print("confirm password: ")
-		password2, err := terminal.ReadPassword(int(os.Stdin.Fd()))
-		if err != nil {
-			return nil, err
-		}
-		if string(password) != string(password2) {
-			return nil, errors.New("passwords do not match")
-		}
-		fmt.Print("\n")
+	return password, nil
+}
+
+func requestPasswordAndConfirm(prompt string) ([]byte, error) {
+	fmt.Print(prompt + ": ")
+	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		return nil, err
 	}
+	fmt.Print("\n")
+	if len(string(password)) < 24 {
+		// The goal is to make manual entry so inconvenient that it's
+		// never used. Use a password manager and a randomly generated
+		// password instead.
+		return nil, errors.New("password must be >= 24 chars")
+	}
+	fmt.Print("confirm password: ")
+	password2, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		return nil, err
+	}
+	if string(password) != string(password2) {
+		return nil, errors.New("passwords do not match")
+	}
+	fmt.Print("\n")
 	return password, nil
 }
 

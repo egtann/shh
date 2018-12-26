@@ -27,8 +27,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-var serverBooted bool
-
 func main() {
 	err := run()
 	if err != nil {
@@ -43,7 +41,10 @@ func main() {
 }
 
 func run() error {
+	nonInteractive := flag.Bool("n", false,
+		"Non-interactive mode. Fail if shh would prompt for the password")
 	flag.Parse()
+
 	arg, tail := parseArg(flag.Args())
 	if arg == "" || arg == "help" {
 		return emptyArgError{}
@@ -70,15 +71,15 @@ func run() error {
 	case "gen-keys":
 		return genKeys(tail)
 	case "get":
-		return get(tail)
+		return get(*nonInteractive, tail)
 	case "set":
 		return set(tail)
 	case "del":
 		return del(tail)
 	case "edit":
-		return edit(tail)
+		return edit(*nonInteractive, tail)
 	case "allow":
-		return allow(tail)
+		return allow(*nonInteractive, tail)
 	case "deny":
 		return deny(tail)
 	case "add-user":
@@ -94,7 +95,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.0.6")
+		fmt.Println("1.1.0")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -158,7 +159,7 @@ func initShh() error {
 // TODO enforce 600 permissions on id_rsa file and .shh when any command is run
 
 // get a secret value by name.
-func get(args []string) error {
+func get(nonInteractive bool, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `get $name`")
 	}
@@ -179,9 +180,16 @@ func get(args []string) error {
 	if err != nil {
 		return err
 	}
-	user.Password, err = requestPassword(user.Port, "", false)
-	if err != nil {
-		return err
+	if nonInteractive {
+		user.Password, err = requestPasswordFromServer(user.Port, false)
+		if err != nil {
+			return err
+		}
+	} else {
+		user.Password, err = requestPassword(user.Port, defaultPasswordPrompt)
+		if err != nil {
+			return err
+		}
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
@@ -309,7 +317,7 @@ func del(args []string) error {
 // allow a user to access a secret. You must have access yourself.
 //
 // TODO allow all using "$user *" syntax.
-func allow(args []string) error {
+func allow(nonInteractive bool, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `allow $user $secret`")
 	}
@@ -337,9 +345,16 @@ func allow(args []string) error {
 	}
 
 	// Decrypt all matching secrets
-	user.Password, err = requestPassword(user.Port, "", false)
-	if err != nil {
-		return err
+	if nonInteractive {
+		user.Password, err = requestPasswordFromServer(user.Port, false)
+		if err != nil {
+			return err
+		}
+	} else {
+		user.Password, err = requestPassword(user.Port, defaultPasswordPrompt)
+		if err != nil {
+			return err
+		}
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
@@ -492,7 +507,7 @@ func showUser(shh *Shh, username Username) error {
 }
 
 // edit a secret using $EDITOR.
-func edit(args []string) error {
+func edit(nonInteractive bool, args []string) error {
 	if len(args) > 1 {
 		return errors.New("bad args: expected `edit $secret`")
 	}
@@ -504,9 +519,16 @@ func edit(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword(user.Port, "", false)
-	if err != nil {
-		return err
+	if nonInteractive {
+		user.Password, err = requestPasswordFromServer(user.Port, false)
+		if err != nil {
+			return err
+		}
+	} else {
+		user.Password, err = requestPassword(user.Port, defaultPasswordPrompt)
+		if err != nil {
+			return err
+		}
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
@@ -622,11 +644,11 @@ func rotate(args []string) error {
 	}
 
 	// Allow changing the password
-	oldPass, err := requestPassword(-1, "old password", false)
+	oldPass, err := requestPassword(-1, "old password")
 	if err != nil {
 		return errors.Wrap(err, "request old password")
 	}
-	newPass, err := requestPassword(-1, "new password", true)
+	newPass, err := requestPasswordAndConfirm("new password")
 	if err != nil {
 		return errors.Wrap(err, "request new password")
 	}
@@ -811,21 +833,31 @@ func serve(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
+	const tickTime = time.Hour
 	var mu sync.Mutex
 	password := ""
-	if !serverBooted {
-		serverBooted = true
-		go func() {
-			// TODO reset timer on each login
-			for range time.Tick(time.Hour) {
+	resetTicker := make(chan struct{})
+	ticker := time.NewTicker(tickTime)
+	go func() {
+		for {
+			select {
+			case <-resetTicker:
+				ticker.Stop()
+				ticker = time.NewTicker(tickTime)
+			case <-ticker.C:
 				mu.Lock()
 				password = ""
 				mu.Unlock()
 			}
-		}()
-	}
+		}
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/reset-timer" {
+			resetTicker <- struct{}{}
+		}
 		if r.Method == "GET" {
 			w.Write([]byte(password))
 			return
@@ -839,9 +871,7 @@ func serve(args []string) error {
 			w.Write([]byte(err.Error()))
 			return
 		}
-		mu.Lock()
 		password = string(byt)
-		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
 	return http.ListenAndServe(fmt.Sprint(":", user.Port), mux)
@@ -860,7 +890,14 @@ func login(args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	user.Password, err = requestPassword(-1, "", false)
+
+	// Attempt to use cached password before asking again
+	user.Password, err = requestPasswordFromServer(user.Port, true)
+	if err == nil {
+		return nil
+	}
+
+	user.Password, err = requestPassword(-1, defaultPasswordPrompt)
 	if err != nil {
 		return errors.Wrap(err, "request password")
 	}
@@ -871,7 +908,8 @@ func login(args []string) error {
 	}
 
 	buf := bytes.NewBuffer(user.Password)
-	resp, err := http.Post(fmt.Sprint("http://127.0.0.1:", user.Port), "plaintext", buf)
+	url := fmt.Sprint("http://127.0.0.1:", user.Port)
+	resp, err := http.Post(url, "plaintext", buf)
 	if err != nil {
 		return errors.Wrap(err, "new request")
 	}
@@ -911,7 +949,6 @@ func usage() {
 	shh [flags] [command]
 
 global commands:
-
 	init			initialize store or add self to existing store
 	get $name		get secret
 	set $name $val		set secret
@@ -926,7 +963,10 @@ global commands:
 	serve			start server to maintain password in memory
 	login			login to server to maintain password in memory
 	version			version information
-	help			usage info`)
+	help			usage info
+
+flags:
+	-n			Non-interactive mode. Fail if shh would prompt for the password`)
 }
 
 func backupReminder(withConfig bool) {
