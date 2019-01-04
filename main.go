@@ -95,7 +95,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.1.0")
+		fmt.Println("1.1.1")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
