@@ -243,42 +243,55 @@ func set(args []string) error {
 	if _, exist := shh.Secrets[user.Username]; !exist {
 		shh.Secrets[user.Username] = map[string]Secret{}
 	}
-	keys, err := getPublicKey(configPath)
-	if err != nil {
-		return errors.Wrap(err, "get public key")
-	}
-
-	// Encrypt the secret using an AES key
-	aesKey := make([]byte, 32)
-	if _, err := rand.Read(aesKey); err != nil {
-		return errors.Wrap(err, "read aes key")
-	}
-	aesBlock, err := aes.NewCipher(aesKey)
-	if err != nil {
-		return errors.Wrap(err, "new aes cipher")
-	}
+	key := args[0]
 	plaintext := args[1]
-	encrypted := make([]byte, aes.BlockSize+len(plaintext))
-	iv := encrypted[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return errors.Wrap(err, "read iv")
-	}
-	stream := cipher.NewCFBEncrypter(aesBlock, iv)
-	stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
 
-	// Encrypt the AES key using the private RSA key
-	aesKey, err = rsa.EncryptOAEP(sha256.New(), rand.Reader,
-		keys.PublicKey, []byte(aesKey), nil)
-	if err != nil {
-		return errors.Wrap(err, "encrypt aes key")
+	// Encrypt content for each user with access to the secret
+	for username, secrets := range shh.Secrets {
+		if _, ok := secrets[key]; !ok {
+			continue
+		}
+
+		// Generate an AES key to encrypt the data. We use AES-256
+		// which requires a 32-byte key
+		aesKey := make([]byte, 32)
+		if _, err := rand.Read(aesKey); err != nil {
+			return err
+		}
+		aesBlock, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+
+		// Encrypt the secret using the new AES key
+		encrypted := make([]byte, aes.BlockSize+len(plaintext))
+		iv := encrypted[:aes.BlockSize]
+		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+			return errors.Wrap(err, "read iv")
+		}
+		stream := cipher.NewCFBEncrypter(aesBlock, iv)
+		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
+
+		// Encrypt the AES key using the public key
+		pubKey, err := x509.ParsePKCS1PublicKey(shh.Keys[username].Bytes)
+		if err != nil {
+			return errors.Wrap(err, "parse public key")
+		}
+		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
+			pubKey, aesKey, nil)
+		if err != nil {
+			return errors.Wrap(err, "reencrypt secret")
+		}
+
+		// We base64 encode all encrypted data before passing it into
+		// the .shh file
+		sec := Secret{
+			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
+			Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+		}
+		shh.Secrets[username][key] = sec
 	}
-	sec := Secret{
-		AESKey:    base64.StdEncoding.EncodeToString(aesKey),
-		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
-	}
-	shh.Secrets[user.Username][args[0]] = sec
-	err = shh.EncodeToFile()
-	return errors.Wrap(err, "encode to path")
+	return shh.EncodeToFile()
 }
 
 // del deletes a secret for all users.
@@ -556,10 +569,8 @@ func edit(nonInteractive bool, args []string) error {
 	// Copy decrypted secret into tmp file
 	var plaintext, aesKey []byte
 	var key string
-	var secret Secret
 	for k, sec := range secrets {
 		key = k
-		secret = sec
 
 		// Decrypt the AES key using the private key
 		aesKey, err = rsa.DecryptOAEP(sha256.New(), rand.Reader,
@@ -602,17 +613,11 @@ func edit(nonInteractive bool, args []string) error {
 		return errors.Wrap(err, "wait")
 	}
 
-	// Re-encrypt content
-	aesBlock, err := aes.NewCipher(aesKey)
-	if err != nil {
-		return errors.Wrap(err, "new aes cipher")
-	}
+	// Check if the contents have changed. If not, we can exit early
 	plaintext, err = ioutil.ReadFile(fi.Name())
 	if err != nil {
 		return errors.Wrap(err, "read all")
 	}
-
-	// Check if the contents have changed. If not, we can exit early
 	h = sha1.New()
 	h.Write(plaintext)
 	newHash := hex.EncodeToString(h.Sum(nil))
@@ -620,18 +625,50 @@ func edit(nonInteractive bool, args []string) error {
 		return nil
 	}
 
-	encrypted := make([]byte, aes.BlockSize+len(plaintext))
-	iv := encrypted[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return errors.Wrap(err, "read iv")
-	}
-	stream := cipher.NewCFBEncrypter(aesBlock, iv)
-	stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
+	// Re-encrypt content for each user with access to the secret
+	for username, secrets := range shh.Secrets {
+		if _, ok := secrets[key]; !ok {
+			continue
+		}
 
-	// Re-write the project file with the updated secret
-	shh.Secrets[user.Username][key] = Secret{
-		AESKey:    base64.StdEncoding.EncodeToString([]byte(secret.AESKey)),
-		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+		// Generate an AES key to encrypt the data. We use AES-256
+		// which requires a 32-byte key
+		aesKey = make([]byte, 32)
+		if _, err := rand.Read(aesKey); err != nil {
+			return err
+		}
+		aesBlock, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+
+		// Encrypt the secret using the new AES key
+		encrypted := make([]byte, aes.BlockSize+len(plaintext))
+		iv := encrypted[:aes.BlockSize]
+		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+			return errors.Wrap(err, "read iv")
+		}
+		stream := cipher.NewCFBEncrypter(aesBlock, iv)
+		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
+
+		// Encrypt the AES key using the public key
+		pubKey, err := x509.ParsePKCS1PublicKey(shh.Keys[username].Bytes)
+		if err != nil {
+			return errors.Wrap(err, "parse public key")
+		}
+		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
+			pubKey, aesKey, nil)
+		if err != nil {
+			return errors.Wrap(err, "reencrypt secret")
+		}
+
+		// We base64 encode all encrypted data before passing it into
+		// the .shh file
+		sec := Secret{
+			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
+			Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+		}
+		shh.Secrets[username][key] = sec
 	}
 	return shh.EncodeToFile()
 }
