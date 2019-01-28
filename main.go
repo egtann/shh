@@ -248,8 +248,10 @@ func set(args []string) error {
 
 	// Encrypt content for each user with access to the secret
 	for username, secrets := range shh.Secrets {
-		if _, ok := secrets[key]; !ok {
-			continue
+		if username != user.Username {
+			if _, ok := secrets[key]; !ok {
+				continue
+			}
 		}
 
 		// Generate an AES key to encrypt the data. We use AES-256
