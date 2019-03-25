@@ -218,7 +218,7 @@ func get(nonInteractive bool, args []string) error {
 		stream := cipher.NewCFBDecrypter(aesBlock, iv)
 		plaintext := make([]byte, len(ciphertext))
 		stream.XORKeyStream(plaintext, []byte(ciphertext))
-		fmt.Printf(string(plaintext))
+		fmt.Print(string(plaintext))
 	}
 	return nil
 }
