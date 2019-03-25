@@ -31,7 +31,7 @@ to store your secrets. Your public key was automatically added to the `.shh`
 file, so you can now add secrets, like so:
 
 ```
-shh set staging/env $(< staging.env)
+shh set staging/env "$(cat staging.env)"
 ```
 
 Where `staging/env` is the name of the secret and the content of the file
