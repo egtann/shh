@@ -124,6 +124,14 @@ shh rotate
 This will ask for a new password, generate new keys and re-encrypt all secrets
 using that new password.
 
+### Using the command line
+
+See the difference in secrets granted between two users:
+
+```
+diff -y <(sort <(shh show alice@example.com)) <(sort <(shh show bob@example.com))
+```
+
 ## Key commands
 
 ```
