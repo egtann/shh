@@ -95,7 +95,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.1.1")
+		fmt.Println("1.1.2")
 		return nil
 	default:
 		return fmt.Errorf("unknown arg: %s", arg)
@@ -525,6 +525,9 @@ func showUser(shh *Shh, username Username) error {
 func edit(nonInteractive bool, args []string) error {
 	if len(args) > 1 {
 		return errors.New("bad args: expected `edit $secret`")
+	}
+	if os.Getenv("EDITOR") == "" {
+		return errors.New("must set $EDITOR")
 	}
 	configPath, err := getConfigPath()
 	if err != nil {
