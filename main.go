@@ -31,7 +31,10 @@ func main() {
 	err := run()
 	if err != nil {
 		switch err.(type) {
-		case emptyArgError:
+		case *emptyArgError:
+			usage()
+		case *badArgError:
+			fmt.Println("error: " + err.Error())
 			usage()
 		default:
 			fmt.Println("error: " + err.Error())
@@ -47,7 +50,7 @@ func run() error {
 
 	arg, tail := parseArg(flag.Args())
 	if arg == "" || arg == "help" {
-		return emptyArgError{}
+		return &emptyArgError{}
 	}
 
 	// Enforce that a .shh file exists for anything for most commands
@@ -95,10 +98,10 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.1.2")
+		fmt.Println("1.1.3")
 		return nil
 	default:
-		return fmt.Errorf("unknown arg: %s", arg)
+		return &badArgError{Arg: arg}
 	}
 }
 
@@ -523,7 +526,7 @@ func showUser(shh *Shh, username Username) error {
 
 // edit a secret using $EDITOR.
 func edit(nonInteractive bool, args []string) error {
-	if len(args) > 1 {
+	if len(args) != 1 {
 		return errors.New("bad args: expected `edit $secret`")
 	}
 	if os.Getenv("EDITOR") == "" {
@@ -895,6 +898,10 @@ func serve(args []string) error {
 	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		if r.URL.Path == "/reset-timer" {
@@ -933,6 +940,12 @@ func login(args []string) error {
 		return errors.Wrap(err, "get user")
 	}
 
+	// Ensure the server is available
+	url := fmt.Sprint("http://127.0.0.1:", user.Port)
+	if err = pingServer(url); err != nil {
+		return err
+	}
+
 	// Attempt to use cached password before asking again
 	user.Password, err = requestPasswordFromServer(user.Port, true)
 	if err == nil {
@@ -948,13 +961,12 @@ func login(args []string) error {
 	if _, err = getKeys(configPath, user.Password); err != nil {
 		return err
 	}
-
 	buf := bytes.NewBuffer(user.Password)
-	url := fmt.Sprint("http://127.0.0.1:", user.Port)
 	resp, err := http.Post(url, "plaintext", buf)
 	if err != nil {
 		return errors.Wrap(err, "new request")
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		body, _ := ioutil.ReadAll(resp.Body)
 		return fmt.Errorf("expected 200, got %d: %s", resp.StatusCode, body)

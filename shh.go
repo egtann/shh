@@ -56,9 +56,12 @@ func findShhRecursive(pth string) (string, error) {
 }
 
 func ShhFromPath(pth string) (*Shh, error) {
-	pth, err := findShhRecursive(pth)
-	if err != nil {
+	recursivePath, err := findShhRecursive(pth)
+	if err != nil && err != os.ErrNotExist {
 		return nil, err
+	}
+	if recursivePath != "" {
+		pth = recursivePath
 	}
 	flags := os.O_CREATE | os.O_RDWR
 	fi, err := os.OpenFile(pth, flags, 0644)

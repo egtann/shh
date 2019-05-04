@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh/terminal"
@@ -98,6 +99,9 @@ func createUser(configPath string) (*User, error) {
 // retrieved.
 func requestPasswordFromServer(port int, resetTimer bool) ([]byte, error) {
 	url := fmt.Sprint("http://127.0.0.1:", port)
+	if err := pingServer(url); err != nil {
+		return nil, err
+	}
 	if resetTimer {
 		url += "/reset-timer"
 	}
@@ -270,4 +274,19 @@ func getKeys(pth string, password []byte) (*Keys, error) {
 	keys.PublicKeyBlock = pubKeys.PublicKeyBlock
 	keys.PublicKey = pubKeys.PublicKey
 	return keys, nil
+}
+
+func pingServer(url string) error {
+	resp, err := http.Get(url + "/ping")
+	if err != nil {
+		if strings.HasSuffix(err.Error(), "connection refused") {
+			return errors.New("server not running. run `shh serve` first")
+		}
+		return errors.Wrap(err, "new request")
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad resp code: %d", resp.StatusCode)
+	}
+	return nil
 }
