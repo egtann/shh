@@ -109,9 +109,6 @@ Then run `shh serve` and from another terminal run `shh login` to set your
 password in memory. Now you can run `get` or `allow` without needing to enter
 your password each time -- especially useful during deploy scripts.
 
-You can also edit the included `systemd/shh.service` file for your current user
-and configure `shh serve` to start automatically on boot.
-
 ### Rotate
 
 If your private key is compromised or you need to change your password, you can
