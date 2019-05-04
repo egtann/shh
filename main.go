@@ -98,7 +98,7 @@ func run() error {
 	case "show":
 		return show(tail)
 	case "version":
-		fmt.Println("1.1.3")
+		fmt.Println("1.1.4")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
