@@ -159,8 +159,6 @@ func initShh() error {
 	return shh.EncodeToFile()
 }
 
-// TODO enforce 600 permissions on id_rsa file and .shh when any command is run
-
 // get a secret value by name.
 func get(nonInteractive bool, args []string) error {
 	if len(args) != 1 {

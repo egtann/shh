@@ -241,13 +241,21 @@ func getPublicKey(pth string) (*keys, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "parse public key")
 	}
-
-	// TODO get public key block
 	return keys, nil
 }
 
 func getKeys(pth string, password []byte) (*keys, error) {
 	keyPath := filepath.Join(pth, "id_rsa")
+
+	// Require 600 permission on private key
+	fileInfo, err := os.Stat(keyPath)
+	if err != nil {
+		return nil, err
+	}
+	if fileInfo.Mode() != 0600 {
+		return nil, errors.New("bad private key permission level. id_rsa mode must be set to 0600")
+	}
+
 	byt, err := ioutil.ReadFile(keyPath)
 	if err != nil {
 		return nil, err
