@@ -12,8 +12,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-type Config struct {
-	Username Username
+type config struct {
+	Username username
 	Port     int
 }
 
@@ -25,7 +25,7 @@ func getConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "shh"), nil
 }
 
-func ConfigFromPath(pth string) (*Config, error) {
+func configFromPath(pth string) (*config, error) {
 	pth = filepath.Join(pth, "config")
 	fi, err := os.Open(pth)
 	if os.IsNotExist(err) {
@@ -35,7 +35,7 @@ func ConfigFromPath(pth string) (*Config, error) {
 		return nil, err
 	}
 	defer fi.Close()
-	config := &Config{}
+	conf := &config{}
 	scn := bufio.NewScanner(fi)
 	for scn.Scan() {
 		line := scn.Text()
@@ -47,9 +47,9 @@ func ConfigFromPath(pth string) (*Config, error) {
 		parts[1] = strings.TrimSpace(parts[1])
 		switch parts[0] {
 		case "username":
-			config.Username = Username(parts[1])
+			conf.Username = username(parts[1])
 		case "port":
-			config.Port, err = strconv.Atoi(parts[1])
+			conf.Port, err = strconv.Atoi(parts[1])
 			if err != nil {
 				return nil, errors.Wrapf(err, "invalid port %s", parts[1])
 			}
@@ -60,5 +60,5 @@ func ConfigFromPath(pth string) (*Config, error) {
 	if err = scn.Err(); err != nil {
 		return nil, errors.Wrap(err, "scan")
 	}
-	return config, nil
+	return conf, nil
 }

@@ -18,16 +18,16 @@ import (
 
 const defaultPasswordPrompt = "password"
 
-type User struct {
-	Username Username
+type user struct {
+	Username username
 	Password []byte
 	Port     int
-	Keys     *Keys
+	Keys     *keys
 }
 
-type Username string
+type username string
 
-type Keys struct {
+type keys struct {
 	PublicKey       *rsa.PublicKey
 	PrivateKey      *rsa.PrivateKey
 	PublicKeyBlock  *pem.Block
@@ -36,8 +36,8 @@ type Keys struct {
 
 // getUser from the ~/.config/shh/config file. If the user already exists in
 // the project's shh key, this returns nil User and nil error.
-func getUser(configPath string) (*User, error) {
-	config, err := ConfigFromPath(configPath)
+func getUser(configPath string) (*user, error) {
+	config, err := configFromPath(configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func getUser(configPath string) (*User, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "get public keys")
 	}
-	u := &User{
+	u := &user{
 		Username: config.Username,
 		Port:     config.Port,
 		Keys:     keys,
@@ -54,14 +54,14 @@ func getUser(configPath string) (*User, error) {
 	return u, nil
 }
 
-func createUser(configPath string) (*User, error) {
+func createUser(configPath string) (*user, error) {
 	fmt.Print("username (usually email): ")
-	var username string
-	_, err := fmt.Scan(&username)
+	var uname string
+	_, err := fmt.Scan(&uname)
 	if err != nil {
 		return nil, err
 	}
-	if username == "" {
+	if uname == "" {
 		return nil, errors.New("empty username")
 	}
 
@@ -69,8 +69,8 @@ func createUser(configPath string) (*User, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "request password")
 	}
-	user := &User{
-		Username: Username(username),
+	user := &user{
+		Username: username(uname),
 		Password: password,
 	}
 
@@ -173,8 +173,8 @@ func requestPasswordAndConfirm(prompt string) ([]byte, error) {
 
 // createKeys at the given path, returning the keys and their pem block for use
 // in the .shh file.
-func createKeys(pth string, password []byte) (*Keys, error) {
-	keys := &Keys{}
+func createKeys(pth string, password []byte) (*keys, error) {
+	keys := &keys{}
 	keyPath := filepath.Join(pth, "id_rsa")
 
 	// Generate id_rsa (600) and id_rsa.pub (644)
@@ -226,13 +226,13 @@ func createKeys(pth string, password []byte) (*Keys, error) {
 	return keys, nil
 }
 
-func getPublicKey(pth string) (*Keys, error) {
+func getPublicKey(pth string) (*keys, error) {
 	keyPath := filepath.Join(pth, "id_rsa.pub")
 	byt, err := ioutil.ReadFile(keyPath)
 	if err != nil {
 		return nil, err
 	}
-	keys := &Keys{}
+	keys := &keys{}
 	keys.PublicKeyBlock, _ = pem.Decode(byt)
 	if keys.PublicKeyBlock == nil || keys.PublicKeyBlock.Type != "RSA PUBLIC KEY" {
 		return nil, errors.New("failed to decode pem block for public key")
@@ -246,14 +246,14 @@ func getPublicKey(pth string) (*Keys, error) {
 	return keys, nil
 }
 
-func getKeys(pth string, password []byte) (*Keys, error) {
+func getKeys(pth string, password []byte) (*keys, error) {
 	keyPath := filepath.Join(pth, "id_rsa")
 	byt, err := ioutil.ReadFile(keyPath)
 	if err != nil {
 		return nil, err
 	}
 
-	keys := &Keys{}
+	keys := &keys{}
 	keys.PrivateKeyBlock, _ = pem.Decode(byt)
 	if keys.PrivateKeyBlock == nil || keys.PrivateKeyBlock.Type != "RSA PRIVATE KEY" {
 		return nil, errors.New("failed to decode pem block for encrypted private key")
@@ -267,12 +267,12 @@ func getKeys(pth string, password []byte) (*Keys, error) {
 		return nil, errors.Wrap(err, "parse private key")
 	}
 
-	pubKeys, err := getPublicKey(pth)
+	pubkeys, err := getPublicKey(pth)
 	if err != nil {
 		return nil, errors.Wrap(err, "get public keys")
 	}
-	keys.PublicKeyBlock = pubKeys.PublicKeyBlock
-	keys.PublicKey = pubKeys.PublicKey
+	keys.PublicKeyBlock = pubkeys.PublicKeyBlock
+	keys.PublicKey = pubkeys.PublicKey
 	return keys, nil
 }
 

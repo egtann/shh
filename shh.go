@@ -12,28 +12,28 @@ import (
 	"github.com/pkg/errors"
 )
 
-type Shh struct {
+type shh struct {
 	// Secrets maps users -> secret_labels -> secret_value. Each secret is
 	// uniquely encrypted for each user given their public key.
-	Secrets map[Username]map[string]Secret `json:"secrets"`
+	Secrets map[username]map[string]secret `json:"secrets"`
 
 	// Keys are public keys used to encrypt secrets for each user.
-	Keys map[Username]*pem.Block `json:"keys"`
+	Keys map[username]*pem.Block `json:"keys"`
 
 	// path of the .shh file itself.
 	path string
 }
 
-type Secret struct {
+type secret struct {
 	AESKey    string `json:"key"`
 	Encrypted string `json:"value"`
 }
 
-func NewShh(path string) *Shh {
-	return &Shh{
+func newShh(path string) *shh {
+	return &shh{
 		path:    path,
-		Secrets: map[Username]map[string]Secret{},
-		Keys:    map[Username]*pem.Block{},
+		Secrets: map[username]map[string]secret{},
+		Keys:    map[username]*pem.Block{},
 	}
 }
 
@@ -55,7 +55,7 @@ func findShhRecursive(pth string) (string, error) {
 	return pth, errors.Wrap(err, "stat")
 }
 
-func ShhFromPath(pth string) (*Shh, error) {
+func shhFromPath(pth string) (*shh, error) {
 	recursivePath, err := findShhRecursive(pth)
 	if err != nil && err != os.ErrNotExist {
 		return nil, err
@@ -69,7 +69,7 @@ func ShhFromPath(pth string) (*Shh, error) {
 		return nil, err
 	}
 	defer fi.Close()
-	shh := NewShh(pth)
+	shh := newShh(pth)
 	dec := json.NewDecoder(fi)
 	err = dec.Decode(shh)
 	if err == io.EOF {
@@ -79,7 +79,7 @@ func ShhFromPath(pth string) (*Shh, error) {
 	return shh, errors.Wrap(err, "decode shh")
 }
 
-func (s *Shh) EncodeToFile() error {
+func (s *shh) EncodeToFile() error {
 	flags := os.O_TRUNC | os.O_CREATE | os.O_WRONLY
 	fi, err := os.OpenFile(s.path, flags, 0644)
 	if err != nil {
@@ -89,7 +89,7 @@ func (s *Shh) EncodeToFile() error {
 	return s.Encode(fi)
 }
 
-func (s *Shh) Encode(w io.Writer) error {
+func (s *shh) Encode(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "\t")
 	return enc.Encode(s)
@@ -100,7 +100,7 @@ func (s *Shh) Encode(w io.Writer) error {
 // the glob must be the last character. This is supported: `staging/*` whereas
 // this is not: `staging/*/database_url` (this returns an error). This function
 // only returns nil alongside an error. It may return an empty slice.
-func (s *Shh) GetSecretsForUser(key string, user Username) (map[string]Secret, error) {
+func (s *shh) GetSecretsForUser(key string, user username) (map[string]secret, error) {
 	if key == "" {
 		return nil, errors.New("empty key")
 	}
@@ -109,21 +109,21 @@ func (s *Shh) GetSecretsForUser(key string, user Username) (map[string]Secret, e
 	}
 	userSecrets, exist := s.Secrets[user]
 	if !exist {
-		s.Secrets[user] = map[string]Secret{}
+		s.Secrets[user] = map[string]secret{}
 	}
-	secret, exist := userSecrets[key]
+	sec, exist := userSecrets[key]
 	if exist {
-		tmp, err := base64.StdEncoding.DecodeString(secret.AESKey)
+		tmp, err := base64.StdEncoding.DecodeString(sec.AESKey)
 		if err != nil {
 			return nil, errors.Wrap(err, "decode base64 aes key")
 		}
-		secret.AESKey = string(tmp)
-		tmp, err = base64.StdEncoding.DecodeString(secret.Encrypted)
+		sec.AESKey = string(tmp)
+		tmp, err = base64.StdEncoding.DecodeString(sec.Encrypted)
 		if err != nil {
 			return nil, errors.Wrap(err, "decode base64 secret")
 		}
-		secret.Encrypted = string(tmp)
-		return map[string]Secret{key: secret}, nil
+		sec.Encrypted = string(tmp)
+		return map[string]secret{key: sec}, nil
 	}
 	glob := strings.Index(key, "*")
 	if glob == -1 {
@@ -133,7 +133,7 @@ func (s *Shh) GetSecretsForUser(key string, user Username) (map[string]Secret, e
 		return nil, errors.New("invalid glob: must be last character")
 	}
 	key = key[:len(key)-1]
-	matches := map[string]Secret{}
+	matches := map[string]secret{}
 	for k, v := range userSecrets {
 		match := strings.HasPrefix(k, key)
 		if match {
@@ -153,7 +153,7 @@ func (s *Shh) GetSecretsForUser(key string, user Username) (map[string]Secret, e
 	return matches, nil
 }
 
-func (s *Shh) AllSecrets() []string {
+func (s *shh) AllSecrets() []string {
 	seen := map[string]struct{}{}
 	for _, userSecrets := range s.Secrets {
 		for name := range userSecrets {

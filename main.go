@@ -126,7 +126,7 @@ func genKeys(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = ConfigFromPath(configPath)
+	_, err = configFromPath(configPath)
 	if err == nil {
 		return errors.New("keys exist at ~/.config/shh, run `shh rotate` to change keys")
 	}
@@ -151,7 +151,7 @@ func initShh() error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return errors.Wrap(err, "shh from path")
 	}
@@ -175,7 +175,7 @@ func get(nonInteractive bool, args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -239,12 +239,12 @@ func set(args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
 	if _, exist := shh.Secrets[user.Username]; !exist {
-		shh.Secrets[user.Username] = map[string]Secret{}
+		shh.Secrets[user.Username] = map[string]secret{}
 	}
 	key := args[0]
 	plaintext := args[1]
@@ -290,7 +290,7 @@ func set(args []string) error {
 
 		// We base64 encode all encrypted data before passing it into
 		// the .shh file
-		sec := Secret{
+		sec := secret{
 			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
 			Encrypted: base64.StdEncoding.EncodeToString(encrypted),
 		}
@@ -313,7 +313,7 @@ func del(args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func allow(nonInteractive bool, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `allow $user $secret`")
 	}
-	username := Username(args[0])
+	username := username(args[0])
 	secretKey := args[1]
 	configPath, err := getConfigPath()
 	if err != nil {
@@ -349,7 +349,7 @@ func allow(nonInteractive bool, args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -386,12 +386,12 @@ func allow(nonInteractive bool, args []string) error {
 		return errors.New("no matching secrets which you can access")
 	}
 	if _, exist := shh.Secrets[username]; !exist {
-		shh.Secrets[username] = map[string]Secret{}
+		shh.Secrets[username] = map[string]secret{}
 	}
-	for key, secret := range secrets {
+	for key, sec := range secrets {
 		// Decrypt AES key using personal RSA key
 		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
-			keys.PrivateKey, []byte(secret.AESKey), nil)
+			keys.PrivateKey, []byte(sec.AESKey), nil)
 		if err != nil {
 			return errors.Wrap(err, "decrypt secret")
 		}
@@ -399,7 +399,7 @@ func allow(nonInteractive bool, args []string) error {
 		if err != nil {
 			return err
 		}
-		ciphertext := []byte(secret.Encrypted)
+		ciphertext := []byte(sec.Encrypted)
 		iv := ciphertext[:aes.BlockSize]
 		ciphertext = ciphertext[aes.BlockSize:]
 		stream := cipher.NewCFBDecrypter(aesBlock, iv)
@@ -435,7 +435,7 @@ func allow(nonInteractive bool, args []string) error {
 
 		// We base64 encode all encrypted data before passing it into
 		// the .shh file
-		sec := Secret{
+		sec := secret{
 			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
 			Encrypted: base64.StdEncoding.EncodeToString(encrypted),
 		}
@@ -457,8 +457,8 @@ func deny(args []string) error {
 	} else {
 		secretKey = args[1]
 	}
-	username := Username(args[0])
-	shh, err := ShhFromPath(".shh")
+	username := username(args[0])
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -481,18 +481,18 @@ func show(args []string) error {
 	if len(args) > 1 {
 		return errors.New("bad args: expected `show [$user]`")
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
 	if len(args) == 0 {
 		return showAll(shh)
 	}
-	return showUser(shh, Username(args[0]))
+	return showUser(shh, username(args[0]))
 }
 
 // showAll users and secrets alongside a summary.
-func showAll(shh *Shh) error {
+func showAll(shh *shh) error {
 	secrets := shh.AllSecrets()
 	fmt.Println("====== SUMMARY ======")
 	fmt.Printf("%d users\n", len(shh.Keys))
@@ -500,13 +500,13 @@ func showAll(shh *Shh) error {
 	fmt.Printf("\n")
 	fmt.Printf("======= USERS =======")
 	usernames := []string{}
-	for username := range shh.Keys {
-		usernames = append(usernames, string(username))
+	for uname := range shh.Keys {
+		usernames = append(usernames, string(uname))
 	}
 	sort.Strings(usernames)
-	for _, username := range usernames {
-		userSecrets := shh.Secrets[Username(username)]
-		fmt.Printf("\n%s (%d secrets)\n", username, len(userSecrets))
+	for _, uname := range usernames {
+		userSecrets := shh.Secrets[username(uname)]
+		fmt.Printf("\n%s (%d secrets)\n", uname, len(userSecrets))
 		for secretName := range userSecrets {
 			fmt.Printf("> %s\n", secretName)
 		}
@@ -515,7 +515,7 @@ func showAll(shh *Shh) error {
 }
 
 // showUser secrets.
-func showUser(shh *Shh, username Username) error {
+func showUser(shh *shh, username username) error {
 	secrets := shh.Secrets[username]
 	fmt.Printf("%d secrets\n", len(secrets))
 	for secretName := range secrets {
@@ -555,7 +555,7 @@ func edit(nonInteractive bool, args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
@@ -602,12 +602,16 @@ func edit(nonInteractive bool, args []string) error {
 		plaintext = make([]byte, len(ciphertext))
 		stream.XORKeyStream(plaintext, []byte(ciphertext))
 	}
-	io.Copy(fi, bytes.NewReader(plaintext))
+	if _, err = io.Copy(fi, bytes.NewReader(plaintext)); err != nil {
+		return errors.Wrap(err, "copy")
+	}
 
 	// Checksum the plaintext, so we can exit early if nothing changed
 	// (i.e. don't re-encrypt on saves without changes)
 	h := sha1.New()
-	h.Write(plaintext)
+	if _, err = h.Write(plaintext); err != nil {
+		return errors.Wrap(err, "write hash")
+	}
 	origHash := hex.EncodeToString(h.Sum(nil))
 
 	// Open tmp file in vim
@@ -627,7 +631,9 @@ func edit(nonInteractive bool, args []string) error {
 		return errors.Wrap(err, "read all")
 	}
 	h = sha1.New()
-	h.Write(plaintext)
+	if _, err = h.Write(plaintext); err != nil {
+		return errors.Wrap(err, "write hash")
+	}
 	newHash := hex.EncodeToString(h.Sum(nil))
 	if origHash == newHash {
 		return nil
@@ -672,7 +678,7 @@ func edit(nonInteractive bool, args []string) error {
 
 		// We base64 encode all encrypted data before passing it into
 		// the .shh file
-		sec := Secret{
+		sec := secret{
 			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
 			Encrypted: base64.StdEncoding.EncodeToString(encrypted),
 		}
@@ -713,7 +719,6 @@ func rotate(args []string) error {
 	defer func() {
 		os.RemoveAll(tmpDir)
 	}()
-
 	keys, err := createKeys(tmpDir, newPass)
 	if err != nil {
 		return errors.Wrap(err, "create keys")
@@ -728,14 +733,14 @@ func rotate(args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
 	secrets := shh.Secrets[user.Username]
-	for key, secret := range secrets {
+	for key, sec := range secrets {
 		// Decrypt AES key using old key
-		byt, err := base64.StdEncoding.DecodeString(secret.AESKey)
+		byt, err := base64.StdEncoding.DecodeString(sec.AESKey)
 		if err != nil {
 			return errors.Wrap(err, "decode base64")
 		}
@@ -751,9 +756,9 @@ func rotate(args []string) error {
 		if err != nil {
 			return errors.Wrap(err, "reencrypt secret")
 		}
-		shh.Secrets[user.Username][key] = Secret{
+		shh.Secrets[user.Username][key] = secret{
 			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
-			Encrypted: secret.Encrypted,
+			Encrypted: sec.Encrypted,
 		}
 	}
 
@@ -815,32 +820,32 @@ func addUser(args []string) error {
 	if len(args) != 0 && len(args) != 2 {
 		return errors.New("bad args: expected `add-user [$user $pubkey]`")
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
-	var user *User
+	var u *user
 	if len(args) == 0 {
 		// Default to self
 		configPath, err := getConfigPath()
 		if err != nil {
 			return err
 		}
-		user, err = getUser(configPath)
+		u, err = getUser(configPath)
 		if err != nil {
 			return errors.Wrap(err, "get user")
 		}
 	} else {
-		user = &User{Username: Username(args[0])}
+		u = &user{Username: username(args[0])}
 	}
-	if _, exist := shh.Keys[user.Username]; exist {
+	if _, exist := shh.Keys[u.Username]; exist {
 		return nil
 	}
 	if len(args) == 0 {
-		shh.Keys[user.Username] = user.Keys.PublicKeyBlock
+		shh.Keys[u.Username] = u.Keys.PublicKeyBlock
 	} else {
-		shh.Keys[user.Username], _ = pem.Decode([]byte(args[1]))
-		if shh.Keys[user.Username] == nil {
+		shh.Keys[u.Username], _ = pem.Decode([]byte(args[1]))
+		if shh.Keys[u.Username] == nil {
 			return errors.New("bad public key")
 		}
 	}
@@ -852,11 +857,11 @@ func rmUser(args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `rm-user $user`")
 	}
-	shh, err := ShhFromPath(".shh")
+	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
-	username := Username(args[0])
+	username := username(args[0])
 	if _, exist := shh.Keys[username]; !exist {
 		return errors.New("user not found")
 	}
@@ -908,7 +913,7 @@ func serve(args []string) error {
 			resetTicker <- struct{}{}
 		}
 		if r.Method == "GET" {
-			w.Write([]byte(password))
+			_, _ = w.Write([]byte(password))
 			return
 		}
 		byt, err := ioutil.ReadAll(r.Body)
@@ -917,7 +922,7 @@ func serve(args []string) error {
 		}
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error()))
+			_, _ = w.Write([]byte(err.Error()))
 			return
 		}
 		password = string(byt)
@@ -993,8 +998,8 @@ func copyFile(dst, src string) error {
 	}
 	defer dstFi.Close()
 
-	io.Copy(dstFi, srcFi)
-	return nil
+	_, err = io.Copy(dstFi, srcFi)
+	return errors.Wrap(err, "copy")
 }
 
 func usage() {
