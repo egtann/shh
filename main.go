@@ -331,8 +331,6 @@ func del(args []string) error {
 }
 
 // allow a user to access a secret. You must have access yourself.
-//
-// TODO allow all using "$user *" syntax.
 func allow(nonInteractive bool, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `allow $user $secret`")
