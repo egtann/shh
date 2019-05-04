@@ -516,7 +516,10 @@ func showAll(shh *shh) error {
 
 // showUser secrets.
 func showUser(shh *shh, username username) error {
-	secrets := shh.Secrets[username]
+	secrets, ok := shh.Secrets[username]
+	if !ok {
+		return fmt.Errorf("unknown user: %s", username)
+	}
 	fmt.Printf("%d secrets\n", len(secrets))
 	for secretName := range secrets {
 		fmt.Printf("> %s\n", secretName)
