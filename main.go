@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -97,8 +98,10 @@ func run() error {
 		return login(tail)
 	case "show":
 		return show(tail)
+	case "search":
+		return search(tail)
 	case "version":
-		fmt.Println("1.2.0")
+		fmt.Println("1.3.0")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -470,6 +473,78 @@ func deny(args []string) error {
 		delete(shh.Secrets, username)
 	}
 	return shh.EncodeToFile()
+}
+
+// search owned secrets for a specific regular expression and output any
+// secrets that match.
+func search(args []string) error {
+	if len(args) != 1 {
+		return errors.New("bad args: expected `search $query`")
+	}
+	regex, err := regexp.Compile(args[0])
+	if err != nil {
+		return errors.Wrap(err, "bad regular expression")
+	}
+	shh, err := shhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+
+	// Decrypt all secrets belonging to current user
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+	user, err := getUser(configPath)
+	if err != nil {
+		return errors.Wrap(err, "get user")
+	}
+	user.Password, err = requestPasswordFromServer(user.Port, true)
+	if err != nil {
+		return err
+	}
+	keys, err := getKeys(configPath, user.Password)
+	if err != nil {
+		return errors.Wrap(err, "get keys")
+	}
+	secrets, err := shh.GetSecretsForUser("*", user.Username)
+	if err != nil {
+		return errors.Wrap(err, "get secrets")
+	}
+	if len(secrets) == 0 {
+		return errors.New("no matching secrets which you can access")
+	}
+	var matches []string
+	for key, sec := range secrets {
+		// Decrypt AES key using personal RSA key
+		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
+			keys.PrivateKey, []byte(sec.AESKey), nil)
+		if err != nil {
+			return errors.Wrap(err, "decrypt secret")
+		}
+		aesBlock, err := aes.NewCipher(aesKey)
+		if err != nil {
+			return err
+		}
+		ciphertext := []byte(sec.Encrypted)
+		iv := ciphertext[:aes.BlockSize]
+		ciphertext = ciphertext[aes.BlockSize:]
+		stream := cipher.NewCFBDecrypter(aesBlock, iv)
+		plaintext := make([]byte, len(ciphertext))
+		stream.XORKeyStream(plaintext, []byte(ciphertext))
+
+		// Search for the term
+		if regex.Match(plaintext) {
+			matches = append(matches, key)
+		}
+	}
+
+	// Output secret names containing the term in separate lines (can then
+	// be passed into xargs, etc.)
+	for _, match := range matches {
+		fmt.Println(match)
+	}
+	return nil
 }
 
 // show users and secrets which they can access.
