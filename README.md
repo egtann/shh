@@ -129,6 +129,13 @@ See the difference in secrets granted between two users:
 diff -y <(sort <(shh show alice@example.com)) <(sort <(shh show bob@example.com))
 ```
 
+Edit all files containing a regular expression.
+
+```
+shh search "\d{8,}" | xargs -I % -o shh edit %
+```
+
+
 ## Key commands
 
 ```
@@ -142,6 +149,7 @@ shh deny $user $secret		# deny access to secret
 shh add-user [$user $pubkey]	# add user to project, default self
 shh rm-user $user		# remove user from project
 shh show [$user]		# show user's allowed and denied keys
+shh search $regex		# list all secrets containing the regex
 shh edit			# edit secret using $EDITOR
 shh rotate			# rotate your key
 shh serve			# start server to maintain password in memory
@@ -216,6 +224,9 @@ shh show user bob@example.com
 
 # Show all user keys and meta info
 shh show user "*"
+
+# Show all secrets containing the regular expression
+shh search "example.(com|net)"
 
 # In case of stolen key, you can regenerate/rotate your key
 shh rotate

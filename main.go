@@ -101,7 +101,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.3.0")
+		fmt.Println("1.3.1")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -479,7 +479,7 @@ func deny(args []string) error {
 // secrets that match.
 func search(args []string) error {
 	if len(args) != 1 {
-		return errors.New("bad args: expected `search $query`")
+		return errors.New("bad args: expected `search $regex`")
 	}
 	regex, err := regexp.Compile(args[0])
 	if err != nil {
@@ -1090,6 +1090,7 @@ global commands:
 	deny $user $secret	deny user access to a secret
 	add-user $user $pubkey  add user to project given their public key
 	rm-user $user		remove user from project
+	search $regex		list all secrets containing the regex
 	show [$user]		show user's allowed and denied keys
 	edit			edit a secret using $EDITOR
 	rotate			rotate key
