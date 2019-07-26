@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 )
 
@@ -18,7 +17,7 @@ type config struct {
 }
 
 func getConfigPath() (string, error) {
-	home, err := homedir.Dir()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
