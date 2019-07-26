@@ -102,7 +102,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.3.1")
+		fmt.Println("1.3.2")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
