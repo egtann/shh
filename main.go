@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/pkg/errors"
 )
 
@@ -959,7 +960,12 @@ func serve(args []string) error {
 	}
 	const tickTime = time.Hour
 	var mu sync.Mutex
-	password := ""
+
+	// Clear secrets when exiting
+	memguard.CatchInterrupt()
+	defer memguard.Purge()
+
+	var pwEnclave *memguard.Enclave
 	resetTicker := make(chan struct{})
 	ticker := time.NewTicker(tickTime)
 	go func() {
@@ -970,7 +976,7 @@ func serve(args []string) error {
 				ticker = time.NewTicker(tickTime)
 			case <-ticker.C:
 				mu.Lock()
-				password = ""
+				pwEnclave = nil
 				mu.Unlock()
 			}
 		}
@@ -987,7 +993,17 @@ func serve(args []string) error {
 			resetTicker <- struct{}{}
 		}
 		if r.Method == "GET" {
-			_, _ = w.Write([]byte(password))
+			if pwEnclave == nil {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			b, err := pwEnclave.Open()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			defer b.Destroy()
+			_, _ = w.Write(b.Bytes())
 			return
 		}
 		byt, err := ioutil.ReadAll(r.Body)
@@ -999,7 +1015,7 @@ func serve(args []string) error {
 			_, _ = w.Write([]byte(err.Error()))
 			return
 		}
-		password = string(byt)
+		pwEnclave = memguard.NewEnclave(byt)
 		w.WriteHeader(http.StatusOK)
 	})
 	return http.ListenAndServe(fmt.Sprint(":", user.Port), mux)
