@@ -1,7 +1,9 @@
 module github.com/egtann/shh
 
+go 1.13
+
 require (
-	github.com/awnumar/memguard v0.18.1
+	github.com/egtann/memguard v0.19.5
 	github.com/pkg/errors v0.8.1
-	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4
+	golang.org/x/crypto v0.0.0-20190927123631-a832865fa7ad
 )
