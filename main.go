@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egtann/memguard"
+	"github.com/awnumar/memguard"
 	"github.com/pkg/errors"
 )
 
