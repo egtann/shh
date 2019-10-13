@@ -102,7 +102,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.3.2")
+		fmt.Println("1.3.3")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -126,6 +126,13 @@ func genKeys(args []string) error {
 	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
@@ -143,7 +150,17 @@ func genKeys(args []string) error {
 
 // initShh creates your project file ".shh". If the project file already
 // exists or if keys have not been generated, initShh reports an error.
+//
+// This can't easily have unveil applied to it because shh looks recursively up
+// directories. Unveil only applies after the .shh file is found, however
+// almost no logic exists after that point in this function.
 func initShh() error {
+	const (
+		promises     = "stdio rpath wpath cpath"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	if _, err := os.Stat(".shh"); err == nil {
 		return errors.New(".shh already exists")
 	}
@@ -168,6 +185,13 @@ func get(nonInteractive bool, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `get $name`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty inet unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	secretName := args[0]
 	configPath, err := getConfigPath()
 	if err != nil {
@@ -181,6 +205,12 @@ func get(nonInteractive bool, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Now that we have our files, restrict further access
+	unveil(configPath, "r")
+	unveil(shh.path, "r")
+	unveilBlock()
+
 	secrets, err := shh.GetSecretsForUser(secretName, user.Username)
 	if err != nil {
 		return err
@@ -233,6 +263,13 @@ func set(args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `set $name $val`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath unix unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
@@ -245,6 +282,11 @@ func set(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Now that we have our files, restrict further access
+	unveil(shh.path, "rwc")
+	unveilBlock()
+
 	if _, exist := shh.Secrets[user.Username]; !exist {
 		shh.Secrets[user.Username] = map[string]secret{}
 	}
@@ -306,6 +348,13 @@ func del(args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `del $secret`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	secret := args[0]
 	configPath, err := getConfigPath()
 	if err != nil {
@@ -319,6 +368,11 @@ func del(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Now that we have our files, restrict further access
+	unveil(shh.path, "rwc")
+	unveilBlock()
+
 	secrets, err := shh.GetSecretsForUser(secret, user.Username)
 	if err != nil {
 		return err
@@ -339,6 +393,13 @@ func allow(nonInteractive bool, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `allow $user $secret`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty inet unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	username := username(args[0])
 	secretKey := args[1]
 	configPath, err := getConfigPath()
@@ -353,6 +414,11 @@ func allow(nonInteractive bool, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Now that we have our files, restrict further access
+	unveil(shh.path, "rwc")
+	unveilBlock()
+
 	block, exist := shh.Keys[username]
 	if !exist {
 		return fmt.Errorf("%q is not a user in the project. try `shh add-user %s $PUBKEY`", username, username)
@@ -451,6 +517,13 @@ func deny(args []string) error {
 	if len(args) > 2 {
 		return errors.New("bad args: expected `deny $user [$secret]`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath inet"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	var secretKey string
 	if len(args) == 1 {
 		secretKey = "*"
@@ -464,7 +537,7 @@ func deny(args []string) error {
 	}
 	secrets, err := shh.GetSecretsForUser(secretKey, username)
 	if err != nil {
-		return errors.Wrap(err, "get secrets for user")
+		return err
 	}
 	userSecrets := shh.Secrets[username]
 	for key := range secrets {
@@ -482,6 +555,13 @@ func search(args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `search $regex`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty inet"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	regex, err := regexp.Compile(args[0])
 	if err != nil {
 		return errors.Wrap(err, "bad regular expression")
@@ -607,6 +687,13 @@ func edit(nonInteractive bool, args []string) error {
 	if os.Getenv("EDITOR") == "" {
 		return errors.New("must set $EDITOR")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty proc exec inet unveil"
+		execPromises = "stdio rpath wpath cpath tty proc exec error"
+	)
+	pledge(promises, execPromises)
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
@@ -630,10 +717,13 @@ func edit(nonInteractive bool, args []string) error {
 	if err != nil {
 		return err
 	}
+
 	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
+	unveil(shh.path, "r")
+
 	secrets, err := shh.GetSecretsForUser(args[0], user.Username)
 	if err != nil {
 		return err
@@ -641,6 +731,15 @@ func edit(nonInteractive bool, args []string) error {
 	if len(secrets) > 1 {
 		return errors.New("mulitple secrets found, cannot use *")
 	}
+
+	// Expose /tmp for creating a tmp file, a shell to run commands, our
+	// configured editor, as well as necessary libraries.
+	unveil("/tmp", "rwc")
+	unveil("/usr", "r")
+	unveil("/var/run", "r")
+	unveil("/bin/sh", "x")
+	unveil(os.Getenv("EDITOR"), "rx")
+	unveilBlock()
 
 	// Create tmp file
 	fi, err := ioutil.TempFile("", "shh")
@@ -690,7 +789,7 @@ func edit(nonInteractive bool, args []string) error {
 	origHash := hex.EncodeToString(h.Sum(nil))
 
 	// Open tmp file in vim
-	cmd := exec.Command("bash", "-c", "$EDITOR "+fi.Name())
+	cmd := exec.Command("/bin/sh", "-c", "$EDITOR "+fi.Name())
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
 	if err = cmd.Start(); err != nil {
@@ -768,6 +867,12 @@ func rotate(args []string) error {
 	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
 
 	// Allow changing the password
 	oldPass, err := requestPassword(-1, "old password")
@@ -895,10 +1000,21 @@ func addUser(args []string) error {
 	if len(args) != 0 && len(args) != 2 {
 		return errors.New("bad args: expected `add-user [$user $pubkey]`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
+
+	// Now that we have our files, restrict further access
+	unveil(shh.path, "rwc")
+
 	var u *user
 	if len(args) == 0 {
 		// Default to self
@@ -906,6 +1022,7 @@ func addUser(args []string) error {
 		if err != nil {
 			return err
 		}
+		unveil(configPath, "r")
 		u, err = getUser(configPath)
 		if err != nil {
 			return errors.Wrap(err, "get user")
@@ -913,6 +1030,10 @@ func addUser(args []string) error {
 	} else {
 		u = &user{Username: username(args[0])}
 	}
+
+	// We're done reading files
+	unveilBlock()
+
 	if _, exist := shh.Keys[u.Username]; exist {
 		return nil
 	}
@@ -932,10 +1053,20 @@ func rmUser(args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `rm-user $user`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
+
+	unveil(shh.path, "rwc")
+
 	username := username(args[0])
 	if _, exist := shh.Keys[username]; !exist {
 		return errors.New("user not found")
@@ -945,15 +1076,20 @@ func rmUser(args []string) error {
 	return shh.EncodeToFile()
 }
 
-// serve maintains the password in memory for an hour.
+// serve maintains the password in memory for an hour. serve cannot be pledged
+// because mlock is not allowed, but we are able to unveil.
 func serve(args []string) error {
 	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
+	unveil(configPath, "r")
+	unveilBlock()
+
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
@@ -1026,10 +1162,19 @@ func login(args []string) error {
 	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath inet proc exec tty unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
+	unveil(configPath, "r")
+
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
