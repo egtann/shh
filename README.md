@@ -49,8 +49,9 @@ You'll have to enter your password to retrieve the secret.
 > namespace your secrets for glob matches as described later.
 
 If you need to edit your secret, `shh edit staging/env` can do it. That uses
-your `$EDITOR` of choice. Save and quit to re-encrypt the updated version
-without ever saving an unencrypted version to disk.
+your `$EDITOR` of choice. Note that `$EDITOR` should be an absolute path. Save
+and quit to re-encrypt the updated version without ever saving an unencrypted
+version to disk.
 
 ## Team management
 
