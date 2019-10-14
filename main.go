@@ -102,7 +102,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.3.4")
+		fmt.Println("1.3.5")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -722,7 +722,7 @@ func edit(nonInteractive bool, args []string) error {
 	if err != nil {
 		return err
 	}
-	unveil(shh.path, "r")
+	unveil(shh.path, "rwc")
 
 	secrets, err := shh.GetSecretsForUser(args[0], user.Username)
 	if err != nil {
