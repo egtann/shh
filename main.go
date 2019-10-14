@@ -102,7 +102,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.3.5")
+		fmt.Println("1.3.6")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -402,20 +402,24 @@ func allow(nonInteractive bool, args []string) error {
 
 	username := username(args[0])
 	secretKey := args[1]
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return errors.Wrap(err, "get config path")
 	}
+
 	user, err := getUser(configPath)
 	if err != nil {
 		return errors.Wrap(err, "get user")
 	}
+
 	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
 	}
 
-	// Now that we have our files, restrict further access
+	// Now that we have our files, prevent further unveils
+	unveil(configPath, "r")
 	unveil(shh.path, "rwc")
 	unveilBlock()
 
