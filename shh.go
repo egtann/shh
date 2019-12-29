@@ -20,6 +20,11 @@ type shh struct {
 	// Keys are public keys used to encrypt secrets for each user.
 	Keys map[username]*pem.Block `json:"keys"`
 
+	// namespace to which all secret names are added. This prevents two
+	// users creating their own secrets which have the same name but
+	// resolve to different secrets.
+	namespace map[string]struct{}
+
 	// path of the .shh file itself.
 	path string
 }
@@ -31,9 +36,10 @@ type secret struct {
 
 func newShh(path string) *shh {
 	return &shh{
-		path:    path,
-		Secrets: map[username]map[string]secret{},
-		Keys:    map[username]*pem.Block{},
+		Secrets:   map[username]map[string]secret{},
+		Keys:      map[username]*pem.Block{},
+		namespace: map[string]struct{}{},
+		path:      path,
 	}
 }
 
@@ -72,11 +78,19 @@ func shhFromPath(pth string) (*shh, error) {
 	shh := newShh(pth)
 	dec := json.NewDecoder(fi)
 	err = dec.Decode(shh)
-	if err == io.EOF {
+	switch {
+	case err == io.EOF:
 		// We newly created the file. Not an error, just an empty .shh
 		return shh, nil
+	case err != nil:
+		return nil, errors.Wrap(err, "decode")
 	}
-	return shh, errors.Wrap(err, "decode shh")
+	for _, secrets := range shh.Secrets {
+		for secretName := range secrets {
+			shh.namespace[secretName] = struct{}{}
+		}
+	}
+	return shh, nil
 }
 
 func (s *shh) EncodeToFile() error {
@@ -96,7 +110,7 @@ func (s *shh) Encode(w io.Writer) error {
 }
 
 // GetSecretsForUser. If there's an exact key match, the secret will be
-// returned.  If not, the "*" glob matches all secrets after the glob. If used,
+// returned. If not, the "*" glob matches all secrets after the glob. If used,
 // the glob must be the last character. This is supported: `staging/*` whereas
 // this is not: `staging/*/database_url` (this returns an error). This function
 // only returns nil alongside an error. It may return an empty slice.

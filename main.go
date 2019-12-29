@@ -102,7 +102,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.3.6")
+		fmt.Println("1.4.0")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -162,7 +162,7 @@ func initShh() error {
 	pledge(promises, execPromises)
 
 	if _, err := os.Stat(".shh"); err == nil {
-		return errors.New(".shh already exists")
+		return errors.New(".shh exists")
 	}
 	configPath, err := getConfigPath()
 	if err != nil {
@@ -293,6 +293,12 @@ func set(args []string) error {
 	key := args[0]
 	plaintext := args[1]
 
+	// Confirm that a secret under this name is not already in the global
+	// namespace
+	if _, exists := shh.namespace[key]; exists {
+		return errors.New("key exists")
+	}
+
 	// Encrypt content for each user with access to the secret
 	for username, secrets := range shh.Secrets {
 		if username != user.Username {
@@ -343,7 +349,9 @@ func set(args []string) error {
 	return shh.EncodeToFile()
 }
 
-// del deletes a secret for all users.
+// del deletes a secret for all users if the user has access to the secret. The
+// user can manually delete secrets belonging to others, but this prevents
+// accidentally deleting secrets belonging to others.
 func del(args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `del $secret`")
@@ -373,19 +381,32 @@ func del(args []string) error {
 	unveil(shh.path, "rwc")
 	unveilBlock()
 
-	secrets, err := shh.GetSecretsForUser(secret, user.Username)
+	// Confirm that the secret exists at all
+	if _, exists := shh.namespace[secret]; !exists {
+		return errors.New("secret does not exist")
+	}
+
+	// Get all secrets matching a search term. This throws an error if no
+	// matching secrets are found.
+	secretsToDelete, err := shh.GetSecretsForUser(secret, user.Username)
 	if err != nil {
 		return err
 	}
-	userSecrets := shh.Secrets[user.Username]
-	for key := range secrets {
-		delete(userSecrets, key)
+
+	// Delete all matching secrets across every user in the project
+	for username := range shh.Keys {
+		userSecrets := shh.Secrets[username]
+		for key := range secretsToDelete {
+			delete(userSecrets, key)
+		}
+		if len(userSecrets) == 0 {
+			delete(shh.Secrets, username)
+		}
 	}
-	if len(userSecrets) == 0 {
-		delete(shh.Secrets, user.Username)
+	if err = shh.EncodeToFile(); err != nil {
+		return errors.Wrap(err, "encode to file")
 	}
-	err = shh.EncodeToFile()
-	return errors.Wrap(err, "encode to path")
+	return nil
 }
 
 // allow a user to access a secret. You must have access yourself.
@@ -647,7 +668,7 @@ func show(args []string) error {
 	return showUser(shh, username(args[0]))
 }
 
-// showAll users and secrets alongside a summary.
+// showAll users and sorted secrets alongside a summary.
 func showAll(shh *shh) error {
 	secrets := shh.AllSecrets()
 	fmt.Println("====== SUMMARY ======")
@@ -661,24 +682,39 @@ func showAll(shh *shh) error {
 	}
 	sort.Strings(usernames)
 	for _, uname := range usernames {
+		// Sort secrets to give consistent output
+		var i int
 		userSecrets := shh.Secrets[username(uname)]
-		fmt.Printf("\n%s (%d secrets)\n", uname, len(userSecrets))
+		secrets := make([]string, len(userSecrets))
 		for secretName := range userSecrets {
-			fmt.Printf("> %s\n", secretName)
+			secrets[i] = secretName
+			i++
+		}
+		sort.Strings(secrets)
+
+		fmt.Printf("\n%s (%d secrets)\n", uname, len(userSecrets))
+		for _, secret := range secrets {
+			fmt.Printf("> %s\n", secret)
 		}
 	}
 	return nil
 }
 
-// showUser secrets.
+// showUser secrets, sorted.
 func showUser(shh *shh, username username) error {
-	secrets, ok := shh.Secrets[username]
+	userSecrets, ok := shh.Secrets[username]
 	if !ok {
 		return fmt.Errorf("unknown user: %s", username)
 	}
-	fmt.Printf("%d secrets\n", len(secrets))
-	for secretName := range secrets {
-		fmt.Printf("> %s\n", secretName)
+	var i int
+	secrets := make([]string, len(userSecrets))
+	for secretName := range userSecrets {
+		secrets[i] = secretName
+		i++
+	}
+	sort.Strings(secrets)
+	for _, secret := range secrets {
+		fmt.Printf("> %s\n", secret)
 	}
 	return nil
 }

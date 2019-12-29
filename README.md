@@ -47,6 +47,11 @@ You'll have to enter your password to retrieve the secret.
 
 > **NOTE:** There's no concept in shh of directories or `/`, but it's useful to
 > namespace your secrets for glob matches as described later.
+>
+> Also note that secrets belong to a global namespace. If Bob creates secret
+> "A", but Alice doesn't have access, Alice trying to create a secret named "A"
+> will result in an error. The same name resolves to the same secret for every
+> user in the project, regardless of whether or not that user has access.
 
 If you need to edit your secret, `shh edit staging/env` can do it. That uses
 your `$EDITOR` of choice. Note that `$EDITOR` should be an absolute path. Save
@@ -127,13 +132,19 @@ using that new password.
 See the difference in secrets granted between two users:
 
 ```
-diff -y <(sort <(shh show alice@example.com)) <(sort <(shh show bob@example.com))
+diff -y <(shh show alice@example.com) <(shh show bob@example.com)
 ```
 
-Edit all files containing a regular expression.
+Edit all files containing a regular expression:
 
 ```
 shh search "\d{8,}" | xargs -I % -o shh edit %
+```
+
+Count the number of secrets to which a user has access:
+
+```
+shh show bob@example.com | wc -l
 ```
 
 
