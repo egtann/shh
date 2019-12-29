@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,7 +27,6 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
-	"github.com/pkg/errors"
 )
 
 func main() {
@@ -102,7 +102,7 @@ func run() error {
 	case "search":
 		return search(tail)
 	case "version":
-		fmt.Println("1.4.0")
+		fmt.Println("1.4.1")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -170,11 +170,11 @@ func initShh() error {
 	}
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 	shh, err := shhFromPath(".shh")
 	if err != nil {
-		return errors.Wrap(err, "shh from path")
+		return fmt.Errorf("shh from path: %w", err)
 	}
 	shh.Keys[user.Username] = user.Keys.PublicKeyBlock
 	return shh.EncodeToFile()
@@ -199,7 +199,7 @@ func get(nonInteractive bool, args []string) error {
 	}
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 	shh, err := shhFromPath(".shh")
 	if err != nil {
@@ -235,7 +235,7 @@ func get(nonInteractive bool, args []string) error {
 		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
 			keys.PrivateKey, []byte(secret.AESKey), nil)
 		if err != nil {
-			return errors.Wrap(err, "decrypt secret")
+			return fmt.Errorf("decrypt secret: %w", err)
 		}
 
 		// Use the decrypted AES key to decrypt the secret
@@ -322,7 +322,7 @@ func set(args []string) error {
 		encrypted := make([]byte, aes.BlockSize+len(plaintext))
 		iv := encrypted[:aes.BlockSize]
 		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-			return errors.Wrap(err, "read iv")
+			return fmt.Errorf("read iv: %w", err)
 		}
 		stream := cipher.NewCFBEncrypter(aesBlock, iv)
 		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
@@ -330,12 +330,12 @@ func set(args []string) error {
 		// Encrypt the AES key using the public key
 		pubKey, err := x509.ParsePKCS1PublicKey(shh.Keys[username].Bytes)
 		if err != nil {
-			return errors.Wrap(err, "parse public key")
+			return fmt.Errorf("parse public key: %w", err)
 		}
 		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
 			pubKey, aesKey, nil)
 		if err != nil {
-			return errors.Wrap(err, "reencrypt secret")
+			return fmt.Errorf("reencrypt secret: %w", err)
 		}
 
 		// We base64 encode all encrypted data before passing it into
@@ -404,7 +404,7 @@ func del(args []string) error {
 		}
 	}
 	if err = shh.EncodeToFile(); err != nil {
-		return errors.Wrap(err, "encode to file")
+		return fmt.Errorf("encode to file: %w", err)
 	}
 	return nil
 }
@@ -426,12 +426,12 @@ func allow(nonInteractive bool, args []string) error {
 
 	configPath, err := getConfigPath()
 	if err != nil {
-		return errors.Wrap(err, "get config path")
+		return fmt.Errorf("get config path: %w", err)
 	}
 
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 
 	shh, err := shhFromPath(".shh")
@@ -450,7 +450,7 @@ func allow(nonInteractive bool, args []string) error {
 	}
 	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return errors.Wrap(err, "parse public key")
+		return fmt.Errorf("parse public key: %w", err)
 	}
 
 	// Decrypt all matching secrets
@@ -467,7 +467,7 @@ func allow(nonInteractive bool, args []string) error {
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
-		return errors.Wrap(err, "get keys")
+		return fmt.Errorf("get keys: %w", err)
 	}
 	secrets, err := shh.GetSecretsForUser(secretKey, user.Username)
 	if err != nil {
@@ -484,7 +484,7 @@ func allow(nonInteractive bool, args []string) error {
 		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
 			keys.PrivateKey, []byte(sec.AESKey), nil)
 		if err != nil {
-			return errors.Wrap(err, "decrypt secret")
+			return fmt.Errorf("decrypt secret: %w", err)
 		}
 		aesBlock, err := aes.NewCipher(aesKey)
 		if err != nil {
@@ -512,7 +512,7 @@ func allow(nonInteractive bool, args []string) error {
 		encrypted := make([]byte, aes.BlockSize+len(plaintext))
 		iv = encrypted[:aes.BlockSize]
 		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-			return errors.Wrap(err, "read iv")
+			return fmt.Errorf("read iv: %w", err)
 		}
 		stream = cipher.NewCFBEncrypter(aesBlock, iv)
 		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
@@ -521,7 +521,7 @@ func allow(nonInteractive bool, args []string) error {
 		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
 			pubKey, aesKey, nil)
 		if err != nil {
-			return errors.Wrap(err, "reencrypt secret")
+			return fmt.Errorf("reencrypt secret: %w", err)
 		}
 
 		// We base64 encode all encrypted data before passing it into
@@ -589,7 +589,7 @@ func search(args []string) error {
 
 	regex, err := regexp.Compile(args[0])
 	if err != nil {
-		return errors.Wrap(err, "bad regular expression")
+		return fmt.Errorf("bad regular expression: %w", err)
 	}
 	shh, err := shhFromPath(".shh")
 	if err != nil {
@@ -603,7 +603,7 @@ func search(args []string) error {
 	}
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 	user.Password, err = requestPasswordFromServer(user.Port, true)
 	if err != nil {
@@ -611,11 +611,11 @@ func search(args []string) error {
 	}
 	keys, err := getKeys(configPath, user.Password)
 	if err != nil {
-		return errors.Wrap(err, "get keys")
+		return fmt.Errorf("get keys: %w", err)
 	}
 	secrets, err := shh.GetSecretsForUser("*", user.Username)
 	if err != nil {
-		return errors.Wrap(err, "get secrets")
+		return fmt.Errorf("get secrets: %w", err)
 	}
 	if len(secrets) == 0 {
 		return errors.New("no matching secrets which you can access")
@@ -626,7 +626,7 @@ func search(args []string) error {
 		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
 			keys.PrivateKey, []byte(sec.AESKey), nil)
 		if err != nil {
-			return errors.Wrap(err, "decrypt secret")
+			return fmt.Errorf("decrypt secret: %w", err)
 		}
 		aesBlock, err := aes.NewCipher(aesKey)
 		if err != nil {
@@ -740,7 +740,7 @@ func edit(nonInteractive bool, args []string) error {
 	}
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 	if nonInteractive {
 		user.Password, err = requestPasswordFromServer(user.Port, false)
@@ -784,7 +784,7 @@ func edit(nonInteractive bool, args []string) error {
 	// Create tmp file
 	fi, err := ioutil.TempFile("", "shh")
 	if err != nil {
-		return errors.Wrap(err, "temp file")
+		return fmt.Errorf("temp file: %w", err)
 	}
 	defer fi.Close()
 
@@ -798,7 +798,7 @@ func edit(nonInteractive bool, args []string) error {
 		aesKey, err = rsa.DecryptOAEP(sha256.New(), rand.Reader,
 			keys.PrivateKey, []byte(sec.AESKey), nil)
 		if err != nil {
-			return errors.Wrap(err, "decrypt secret")
+			return fmt.Errorf("decrypt secret: %w", err)
 		}
 
 		// Use the decrypted AES key to decrypt the secret
@@ -817,14 +817,14 @@ func edit(nonInteractive bool, args []string) error {
 		stream.XORKeyStream(plaintext, []byte(ciphertext))
 	}
 	if _, err = io.Copy(fi, bytes.NewReader(plaintext)); err != nil {
-		return errors.Wrap(err, "copy")
+		return fmt.Errorf("copy: %w", err)
 	}
 
 	// Checksum the plaintext, so we can exit early if nothing changed
 	// (i.e. don't re-encrypt on saves without changes)
 	h := sha1.New()
 	if _, err = h.Write(plaintext); err != nil {
-		return errors.Wrap(err, "write hash")
+		return fmt.Errorf("write hash: %w", err)
 	}
 	origHash := hex.EncodeToString(h.Sum(nil))
 
@@ -833,20 +833,20 @@ func edit(nonInteractive bool, args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
 	if err = cmd.Start(); err != nil {
-		return errors.Wrap(err, "cmd")
+		return fmt.Errorf("cmd: %w", err)
 	}
 	if err = cmd.Wait(); err != nil {
-		return errors.Wrap(err, "wait")
+		return fmt.Errorf("wait: %w", err)
 	}
 
 	// Check if the contents have changed. If not, we can exit early
 	plaintext, err = ioutil.ReadFile(fi.Name())
 	if err != nil {
-		return errors.Wrap(err, "read all")
+		return fmt.Errorf("read all: %w", err)
 	}
 	h = sha1.New()
 	if _, err = h.Write(plaintext); err != nil {
-		return errors.Wrap(err, "write hash")
+		return fmt.Errorf("write hash: %w", err)
 	}
 	newHash := hex.EncodeToString(h.Sum(nil))
 	if origHash == newHash {
@@ -874,7 +874,7 @@ func edit(nonInteractive bool, args []string) error {
 		encrypted := make([]byte, aes.BlockSize+len(plaintext))
 		iv := encrypted[:aes.BlockSize]
 		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-			return errors.Wrap(err, "read iv")
+			return fmt.Errorf("read iv: %w", err)
 		}
 		stream := cipher.NewCFBEncrypter(aesBlock, iv)
 		stream.XORKeyStream(encrypted[aes.BlockSize:], []byte(plaintext))
@@ -882,12 +882,12 @@ func edit(nonInteractive bool, args []string) error {
 		// Encrypt the AES key using the public key
 		pubKey, err := x509.ParsePKCS1PublicKey(shh.Keys[username].Bytes)
 		if err != nil {
-			return errors.Wrap(err, "parse public key")
+			return fmt.Errorf("parse public key: %w", err)
 		}
 		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
 			pubKey, aesKey, nil)
 		if err != nil {
-			return errors.Wrap(err, "reencrypt secret")
+			return fmt.Errorf("reencrypt secret: %w", err)
 		}
 
 		// We base64 encode all encrypted data before passing it into
@@ -917,11 +917,11 @@ func rotate(args []string) error {
 	// Allow changing the password
 	oldPass, err := requestPassword(-1, "old password")
 	if err != nil {
-		return errors.Wrap(err, "request old password")
+		return fmt.Errorf("request old password: %w", err)
 	}
 	newPass, err := requestPasswordAndConfirm("new password")
 	if err != nil {
-		return errors.Wrap(err, "request new password")
+		return fmt.Errorf("request new password: %w", err)
 	}
 
 	configPath, err := getConfigPath()
@@ -934,18 +934,18 @@ func rotate(args []string) error {
 	// across partitions (common for Linux)
 	tmpDir := filepath.Join(configPath, "tmp")
 	if err = os.Mkdir(tmpDir, 0777); err != nil {
-		return errors.Wrap(err, "make tmp dir")
+		return fmt.Errorf("make tmp dir: %w", err)
 	}
 	defer func() {
 		os.RemoveAll(tmpDir)
 	}()
 	keys, err := createKeys(tmpDir, newPass)
 	if err != nil {
-		return errors.Wrap(err, "create keys")
+		return fmt.Errorf("create keys: %w", err)
 	}
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 
 	// Decrypt all AES secrets for user, re-encrypt with new key
@@ -962,19 +962,19 @@ func rotate(args []string) error {
 		// Decrypt AES key using old key
 		byt, err := base64.StdEncoding.DecodeString(sec.AESKey)
 		if err != nil {
-			return errors.Wrap(err, "decode base64")
+			return fmt.Errorf("decode base64: %w", err)
 		}
 		aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader,
 			oldKeys.PrivateKey, byt, nil)
 		if err != nil {
-			return errors.Wrap(err, "decrypt secret")
+			return fmt.Errorf("decrypt secret: %w", err)
 		}
 
 		// Re-encrypt using new public key
 		encryptedAES, err := rsa.EncryptOAEP(sha256.New(), rand.Reader,
 			keys.PublicKey, aesKey, nil)
 		if err != nil {
-			return errors.Wrap(err, "reencrypt secret")
+			return fmt.Errorf("reencrypt secret: %w", err)
 		}
 		shh.Secrets[user.Username][key] = secret{
 			AESKey:    base64.StdEncoding.EncodeToString(encryptedAES),
@@ -991,19 +991,19 @@ func rotate(args []string) error {
 		filepath.Join(configPath, "id_rsa"),
 	)
 	if err != nil {
-		return errors.Wrap(err, "back up id_rsa")
+		return fmt.Errorf("back up id_rsa: %w", err)
 	}
 	err = copyFile(
 		filepath.Join(configPath, "id_rsa.pub.bak"),
 		filepath.Join(configPath, "id_rsa.pub"),
 	)
 	if err != nil {
-		return errors.Wrap(err, "back up id_rsa.pub")
+		return fmt.Errorf("back up id_rsa.pub: %w", err)
 	}
 
 	// Rewrite the project file to use the new public key
 	if err = shh.EncodeToFile(); err != nil {
-		return errors.Wrap(err, "encode .shh")
+		return fmt.Errorf("encode .shh: %w", err)
 	}
 
 	// Move new keys on top of current keys in the filesystem
@@ -1012,24 +1012,24 @@ func rotate(args []string) error {
 		filepath.Join(configPath, "id_rsa"),
 	)
 	if err != nil {
-		return errors.Wrap(err, "replace id_rsa")
+		return fmt.Errorf("replace id_rsa: %w", err)
 	}
 	err = os.Rename(
 		filepath.Join(tmpDir, "id_rsa.pub"),
 		filepath.Join(configPath, "id_rsa.pub"),
 	)
 	if err != nil {
-		return errors.Wrap(err, "replace id_rsa.pub")
+		return fmt.Errorf("replace id_rsa.pub: %w", err)
 	}
 
 	// Delete our backed up keys
 	err = os.Remove(filepath.Join(configPath, "id_rsa.bak"))
 	if err != nil {
-		return errors.Wrap(err, "delete id_rsa.bak")
+		return fmt.Errorf("delete id_rsa.bak: %w", err)
 	}
 	err = os.Remove(filepath.Join(configPath, "id_rsa.pub.bak"))
 	if err != nil {
-		return errors.Wrap(err, "delete id_rsa.pub.bak")
+		return fmt.Errorf("delete id_rsa.pub.bak: %w", err)
 	}
 	backupReminder(false)
 	return nil
@@ -1065,7 +1065,7 @@ func addUser(args []string) error {
 		unveil(configPath, "r")
 		u, err = getUser(configPath)
 		if err != nil {
-			return errors.Wrap(err, "get user")
+			return fmt.Errorf("get user: %w", err)
 		}
 	} else {
 		u = &user{Username: username(args[0])}
@@ -1132,7 +1132,7 @@ func serve(args []string) error {
 
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 	const tickTime = time.Hour
 	var mu sync.Mutex
@@ -1217,7 +1217,7 @@ func login(args []string) error {
 
 	user, err := getUser(configPath)
 	if err != nil {
-		return errors.Wrap(err, "get user")
+		return fmt.Errorf("get user: %w", err)
 	}
 
 	// Ensure the server is available
@@ -1234,7 +1234,7 @@ func login(args []string) error {
 
 	user.Password, err = requestPassword(-1, defaultPasswordPrompt)
 	if err != nil {
-		return errors.Wrap(err, "request password")
+		return fmt.Errorf("request password: %w", err)
 	}
 
 	// Verify the password before continuing
@@ -1244,7 +1244,7 @@ func login(args []string) error {
 	buf := bytes.NewBuffer(user.Password)
 	resp, err := http.Post(url, "plaintext", buf)
 	if err != nil {
-		return errors.Wrap(err, "new request")
+		return fmt.Errorf("new request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
@@ -1273,8 +1273,10 @@ func copyFile(dst, src string) error {
 	}
 	defer dstFi.Close()
 
-	_, err = io.Copy(dstFi, srcFi)
-	return errors.Wrap(err, "copy")
+	if _, err = io.Copy(dstFi, srcFi); err != nil {
+		return fmt.Errorf("copy: %w", err)
+	}
+	return nil
 }
 
 func usage() {

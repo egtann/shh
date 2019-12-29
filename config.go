@@ -2,13 +2,12 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 type config struct {
@@ -50,14 +49,14 @@ func configFromPath(pth string) (*config, error) {
 		case "port":
 			conf.Port, err = strconv.Atoi(parts[1])
 			if err != nil {
-				return nil, errors.Wrapf(err, "invalid port %s", parts[1])
+				return nil, fmt.Errorf("invalid port %s: %w", parts[1], err)
 			}
 		default:
 			return nil, fmt.Errorf("unknown part %s", parts[0])
 		}
 	}
 	if err = scn.Err(); err != nil {
-		return nil, errors.Wrap(err, "scan")
+		return nil, fmt.Errorf("scan: %w", err)
 	}
 	return conf, nil
 }

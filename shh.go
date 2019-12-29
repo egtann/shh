@@ -4,12 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 type shh struct {
@@ -48,22 +48,28 @@ func newShh(path string) *shh {
 func findShhRecursive(pth string) (string, error) {
 	abs, err := filepath.Abs(pth)
 	if err != nil {
-		return "", errors.Wrap(err, "abs")
+		return "", fmt.Errorf("abs: %w", err)
 	}
 	if abs == string(filepath.Separator)+filepath.Base(pth) {
 		// We hit the root, we're done
 		return "", os.ErrNotExist
 	}
 	_, err = os.Stat(pth)
-	if os.IsNotExist(err) {
+	switch {
+	case os.IsNotExist(err):
 		return findShhRecursive(filepath.Join("..", pth))
+	case err != nil:
+		return "", fmt.Errorf("stat: %w", err)
 	}
-	return pth, errors.Wrap(err, "stat")
+	return pth, nil
 }
 
 func shhFromPath(pth string) (*shh, error) {
 	recursivePath, err := findShhRecursive(pth)
-	if err != nil && err != os.ErrNotExist {
+	switch {
+	case err == os.ErrNotExist:
+		err = nil // Ignore error, keep going
+	case err != nil:
 		return nil, err
 	}
 	if recursivePath != "" {
@@ -83,7 +89,7 @@ func shhFromPath(pth string) (*shh, error) {
 		// We newly created the file. Not an error, just an empty .shh
 		return shh, nil
 	case err != nil:
-		return nil, errors.Wrap(err, "decode")
+		return nil, fmt.Errorf("decode: %w", err)
 	}
 	for _, secrets := range shh.Secrets {
 		for secretName := range secrets {
@@ -129,12 +135,12 @@ func (s *shh) GetSecretsForUser(key string, user username) (map[string]secret, e
 	if exist {
 		tmp, err := base64.StdEncoding.DecodeString(sec.AESKey)
 		if err != nil {
-			return nil, errors.Wrap(err, "decode base64 aes key")
+			return nil, fmt.Errorf("decode b64 aes key: %w", err)
 		}
 		sec.AESKey = string(tmp)
 		tmp, err = base64.StdEncoding.DecodeString(sec.Encrypted)
 		if err != nil {
-			return nil, errors.Wrap(err, "decode base64 secret")
+			return nil, fmt.Errorf("decode b64 secret: %w", err)
 		}
 		sec.Encrypted = string(tmp)
 		return map[string]secret{key: sec}, nil
@@ -153,12 +159,12 @@ func (s *shh) GetSecretsForUser(key string, user username) (map[string]secret, e
 		if match {
 			byt, err := base64.StdEncoding.DecodeString(v.AESKey)
 			if err != nil {
-				return nil, errors.Wrap(err, "decode base64 aes key")
+				return nil, fmt.Errorf("decode b64 aes key: %w", err)
 			}
 			v.AESKey = string(byt)
 			byt, err = base64.StdEncoding.DecodeString(v.Encrypted)
 			if err != nil {
-				return nil, errors.Wrap(err, "decode base64 encrypted")
+				return nil, fmt.Errorf("decode b64 encrypted: %w", err)
 			}
 			v.Encrypted = string(byt)
 			matches[k] = v

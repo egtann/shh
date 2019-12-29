@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -44,7 +44,7 @@ func getUser(configPath string) (*user, error) {
 
 	keys, err := getPublicKey(configPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "get public keys")
+		return nil, fmt.Errorf("get public keys: %w", err)
 	}
 	u := &user{
 		Username: config.Username,
@@ -67,7 +67,7 @@ func createUser(configPath string) (*user, error) {
 
 	password, err := requestPasswordAndConfirm(defaultPasswordPrompt)
 	if err != nil {
-		return nil, errors.Wrap(err, "request password")
+		return nil, fmt.Errorf("request password: %w", err)
 	}
 	user := &user{
 		Username: username(uname),
@@ -83,7 +83,7 @@ func createUser(configPath string) (*user, error) {
 	// Create public and private keys
 	user.Keys, err = createKeys(configPath, user.Password)
 	if err != nil {
-		return nil, errors.Wrap(err, "create keys")
+		return nil, fmt.Errorf("create keys: %w", err)
 	}
 
 	// Create initial config file (644) specifying username
@@ -112,7 +112,7 @@ func requestPasswordFromServer(port int, resetTimer bool) ([]byte, error) {
 	defer resp.Body.Close()
 	password, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, errors.Wrap(err, "read all")
+		return nil, fmt.Errorf("read all: %w", err)
 	}
 	if len(password) == 0 {
 		return nil, errors.New("cached password not available. run `shh login`")
@@ -239,7 +239,7 @@ func getPublicKey(pth string) (*keys, error) {
 	}
 	keys.PublicKey, err = x509.ParsePKCS1PublicKey(keys.PublicKeyBlock.Bytes)
 	if err != nil {
-		return nil, errors.Wrap(err, "parse public key")
+		return nil, fmt.Errorf("parse public key: %w", err)
 	}
 	return keys, nil
 }
@@ -268,16 +268,16 @@ func getKeys(pth string, password []byte) (*keys, error) {
 	}
 	byt, err = x509.DecryptPEMBlock(keys.PrivateKeyBlock, password)
 	if err != nil {
-		return nil, errors.Wrap(err, "decrypt pem")
+		return nil, fmt.Errorf("decrypt pem: %w", err)
 	}
 	keys.PrivateKey, err = x509.ParsePKCS1PrivateKey(byt)
 	if err != nil {
-		return nil, errors.Wrap(err, "parse private key")
+		return nil, fmt.Errorf("parse private key: %w", err)
 	}
 
 	pubkeys, err := getPublicKey(pth)
 	if err != nil {
-		return nil, errors.Wrap(err, "get public keys")
+		return nil, fmt.Errorf("get public keys: %w", err)
 	}
 	keys.PublicKeyBlock = pubkeys.PublicKeyBlock
 	keys.PublicKey = pubkeys.PublicKey
@@ -290,7 +290,7 @@ func pingServer(url string) error {
 		if strings.HasSuffix(err.Error(), "connection refused") {
 			return errors.New("server not running. run `shh serve` first")
 		}
-		return errors.Wrap(err, "new request")
+		return fmt.Errorf("new request: %w", err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
