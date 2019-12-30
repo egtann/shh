@@ -64,6 +64,19 @@ You can rename a secret with `rename` like this:
 shh rename old-name new-name
 ```
 
+If you want to start a new secret using another secret as a starting point and
+maintain all teammates' access:
+
+```
+shh copy old-name new-name
+```
+
+This may be useful when you're setting up a new environment, such as:
+
+```
+shh copy production/env staging/env
+```
+
 ## Team management
 
 You can grant and revoke access to secrets among teammates at any time. First

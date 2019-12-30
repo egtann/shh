@@ -103,8 +103,10 @@ func run() error {
 		return search(tail)
 	case "rename":
 		return rename(tail)
+	case "copy":
+		return copySecret(tail)
 	case "version":
-		fmt.Println("1.5.0")
+		fmt.Println("1.5.2")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -692,6 +694,46 @@ func rename(args []string) error {
 		}
 		labelSecrets[newName] = labelSecrets[oldName]
 		delete(labelSecrets, oldName)
+	}
+	return shh.EncodeToFile()
+}
+
+// copySecret for each user that has access to the current secret.
+func copySecret(args []string) error {
+	if len(args) != 2 {
+		return errors.New("bad args: expected `copy $old $new`")
+	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
+	oldName, newName := args[0], args[1]
+	if oldName == newName {
+		return errors.New("names are identical")
+	}
+	shh, err := shhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+
+	// Now that we have our files, restrict further access
+	unveil(shh.path, "rwc")
+	unveilBlock()
+
+	if _, ok := shh.namespace[oldName]; !ok {
+		return errors.New("secret does not exist")
+	}
+	if _, ok := shh.namespace[newName]; ok {
+		return errors.New("secret already exists by that name")
+	}
+	for _, labelSecrets := range shh.Secrets {
+		if _, ok := labelSecrets[oldName]; !ok {
+			continue
+		}
+		labelSecrets[newName] = labelSecrets[oldName]
 	}
 	return shh.EncodeToFile()
 }
@@ -1332,6 +1374,8 @@ global commands:
 	get $name		get secret
 	set $name $val		set secret
 	del $name		delete a secret
+	copy $old $new          copy a secret, maintaining the same team access
+	rename $old $new        rename a secret
 	allow $user $secret	allow user access to a secret
 	deny $user $secret	deny user access to a secret
 	add-user $user $pubkey  add user to project given their public key
