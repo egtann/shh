@@ -7,3 +7,6 @@ func pledge(promises, execPromises string) {}
 
 // unveil is only supported on OpenBSD.
 func unveil(filepath, perm string) {}
+
+// unveilBlock is only supported on OpenBSD.
+func unveilBlock() {}
