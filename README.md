@@ -58,6 +58,12 @@ your `$EDITOR` of choice. Note that `$EDITOR` should be an absolute path. Save
 and quit to re-encrypt the updated version without ever saving an unencrypted
 version to disk.
 
+You can rename a secret with `rename` like this:
+
+```
+shh rename old-name new-name
+```
+
 ## Team management
 
 You can grant and revoke access to secrets among teammates at any time. First

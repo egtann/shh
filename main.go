@@ -101,8 +101,10 @@ func run() error {
 		return show(tail)
 	case "search":
 		return search(tail)
+	case "rename":
+		return rename(tail)
 	case "version":
-		fmt.Println("1.4.1")
+		fmt.Println("1.5.0")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -651,6 +653,26 @@ func search(args []string) error {
 		fmt.Println(match)
 	}
 	return nil
+}
+
+// rename secrets.
+func rename(args []string) error {
+	if len(args) != 2 {
+		return errors.New("bad args: expected `rename $old $new`")
+	}
+	oldName, newName := args[0], args[1]
+	shh, err := shhFromPath(".shh")
+	if err != nil {
+		return err
+	}
+	for _, labelSecrets := range shh.Secrets {
+		if _, ok := labelSecrets[oldName]; !ok {
+			continue
+		}
+		labelSecrets[newName] = labelSecrets[oldName]
+		delete(labelSecrets, oldName)
+	}
+	return shh.EncodeToFile()
 }
 
 // show users and secrets which they can access.
