@@ -660,10 +660,31 @@ func rename(args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `rename $old $new`")
 	}
+
+	const (
+		promises     = "stdio rpath wpath cpath tty unveil"
+		execPromises = ""
+	)
+	pledge(promises, execPromises)
+
 	oldName, newName := args[0], args[1]
+	if oldName == newName {
+		return errors.New("names are identical")
+	}
 	shh, err := shhFromPath(".shh")
 	if err != nil {
 		return err
+	}
+
+	// Now that we have our files, restrict further access
+	unveil(shh.path, "rwc")
+	unveilBlock()
+
+	if _, ok := shh.namespace[oldName]; !ok {
+		return errors.New("secret does not exist")
+	}
+	if _, ok := shh.namespace[newName]; ok {
+		return errors.New("secret already exists by that name")
 	}
 	for _, labelSecrets := range shh.Secrets {
 		if _, ok := labelSecrets[oldName]; !ok {
