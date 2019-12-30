@@ -3,7 +3,7 @@
 package main
 
 // pledge is only supported on OpenBSD.
-func pledge(promises, execPromises string) error { return nil }
+func pledge(promises, execPromises string) {}
 
 // unveil is only supported on OpenBSD.
-func unveil() error { return nil }
+func unveil(filepath, perm string) {}
