@@ -48,20 +48,25 @@ func main() {
 func run() error {
 	nonInteractive := flag.Bool("n", false,
 		"Non-interactive mode. Fail if shh would prompt for the password")
+	shhFileName := flag.String("f", "", "Name of shh file (default .shh)")
 	flag.Parse()
 
 	arg, tail := parseArg(flag.Args())
 	if arg == "" || arg == "help" {
 		return &emptyArgError{}
 	}
+	if *shhFileName == "" {
+		*shhFileName = ".shh"
+	}
 
 	// Enforce that a .shh file exists for anything for most commands
 	switch arg {
 	case "init", "gen-keys", "serve", "version": // Do nothing
 	default:
-		_, err := findShhRecursive(".shh")
+		_, err := findShhRecursive(*shhFileName)
 		if os.IsNotExist(err) {
-			return errors.New("missing .shh, run `shh init`")
+			return fmt.Errorf("missing %s, run `shh init`",
+				*shhFileName)
 		}
 		if err != nil {
 			return err
@@ -72,41 +77,41 @@ func run() error {
 		if tail != nil {
 			return fmt.Errorf("unknown args: %v", tail)
 		}
-		return initShh()
+		return initShh(*shhFileName)
 	case "gen-keys":
 		return genKeys(tail)
 	case "get":
-		return get(*nonInteractive, tail)
+		return get(*nonInteractive, *shhFileName, tail)
 	case "set":
-		return set(tail)
+		return set(*shhFileName, tail)
 	case "del":
-		return del(tail)
+		return del(*shhFileName, tail)
 	case "edit":
-		return edit(*nonInteractive, tail)
+		return edit(*nonInteractive, *shhFileName, tail)
 	case "allow":
-		return allow(*nonInteractive, tail)
+		return allow(*nonInteractive, *shhFileName, tail)
 	case "deny":
-		return deny(tail)
+		return deny(*shhFileName, tail)
 	case "add-user":
-		return addUser(tail)
+		return addUser(*shhFileName, tail)
 	case "rm-user":
-		return rmUser(tail)
+		return rmUser(*shhFileName, tail)
 	case "rotate":
-		return rotate(tail)
+		return rotate(*shhFileName, tail)
 	case "serve":
 		return serve(tail)
 	case "login":
 		return login(tail)
 	case "show":
-		return show(tail)
+		return show(*shhFileName, tail)
 	case "search":
-		return search(tail)
+		return search(*shhFileName, tail)
 	case "rename":
-		return rename(tail)
+		return rename(*shhFileName, tail)
 	case "copy":
-		return copySecret(tail)
+		return copySecret(*shhFileName, tail)
 	case "version":
-		fmt.Println("1.5.4")
+		fmt.Println("1.6.0")
 		return nil
 	default:
 		return &badArgError{Arg: arg}
@@ -152,21 +157,21 @@ func genKeys(args []string) error {
 	return nil
 }
 
-// initShh creates your project file ".shh". If the project file already
-// exists or if keys have not been generated, initShh reports an error.
+// initShh creates your project file ".shh". If the project file already exists
+// or if keys have not been generated, initShh reports an error.
 //
 // This can't easily have unveil applied to it because shh looks recursively up
 // directories. Unveil only applies after the .shh file is found, however
 // almost no logic exists after that point in this function.
-func initShh() error {
+func initShh(filename string) error {
 	const (
 		promises     = "stdio rpath wpath cpath"
 		execPromises = ""
 	)
 	pledge(promises, execPromises)
 
-	if _, err := os.Stat(".shh"); err == nil {
-		return errors.New(".shh exists")
+	if _, err := os.Stat(filename); err == nil {
+		return fmt.Errorf("%s exists", filename)
 	}
 	configPath, err := getConfigPath()
 	if err != nil {
@@ -176,7 +181,7 @@ func initShh() error {
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return fmt.Errorf("shh from path: %w", err)
 	}
@@ -185,7 +190,7 @@ func initShh() error {
 }
 
 // get a secret value by name.
-func get(nonInteractive bool, args []string) error {
+func get(nonInteractive bool, filename string, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `get $name`")
 	}
@@ -205,7 +210,7 @@ func get(nonInteractive bool, args []string) error {
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -263,7 +268,7 @@ func get(nonInteractive bool, args []string) error {
 }
 
 // set a secret value.
-func set(args []string) error {
+func set(filename string, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `set $name $val`")
 	}
@@ -282,7 +287,7 @@ func set(args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -356,7 +361,7 @@ func set(args []string) error {
 // del deletes a secret for all users if the user has access to the secret. The
 // user can manually delete secrets belonging to others, but this prevents
 // accidentally deleting secrets belonging to others.
-func del(args []string) error {
+func del(filename string, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `del $secret`")
 	}
@@ -376,7 +381,7 @@ func del(args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -414,7 +419,7 @@ func del(args []string) error {
 }
 
 // allow a user to access a secret. You must have access yourself.
-func allow(nonInteractive bool, args []string) error {
+func allow(nonInteractive bool, filename string, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `allow $user $secret`")
 	}
@@ -438,7 +443,7 @@ func allow(nonInteractive bool, args []string) error {
 		return fmt.Errorf("get user: %w", err)
 	}
 
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -542,7 +547,7 @@ func allow(nonInteractive bool, args []string) error {
 }
 
 // deny a user from accessing secrets.
-func deny(args []string) error {
+func deny(filename string, args []string) error {
 	if len(args) > 2 {
 		return errors.New("bad args: expected `deny $user [$secret]`")
 	}
@@ -560,7 +565,7 @@ func deny(args []string) error {
 		secretKey = args[1]
 	}
 	username := username(args[0])
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -580,7 +585,7 @@ func deny(args []string) error {
 
 // search owned secrets for a specific regular expression and output any
 // secrets that match.
-func search(args []string) error {
+func search(filename string, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `search $regex`")
 	}
@@ -595,7 +600,7 @@ func search(args []string) error {
 	if err != nil {
 		return fmt.Errorf("bad regular expression: %w", err)
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -658,7 +663,7 @@ func search(args []string) error {
 }
 
 // rename secrets.
-func rename(args []string) error {
+func rename(filename string, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `rename $old $new`")
 	}
@@ -673,7 +678,7 @@ func rename(args []string) error {
 	if oldName == newName {
 		return errors.New("names are identical")
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -699,7 +704,7 @@ func rename(args []string) error {
 }
 
 // copySecret for each user that has access to the current secret.
-func copySecret(args []string) error {
+func copySecret(filename string, args []string) error {
 	if len(args) != 2 {
 		return errors.New("bad args: expected `copy $old $new`")
 	}
@@ -714,7 +719,7 @@ func copySecret(args []string) error {
 	if oldName == newName {
 		return errors.New("names are identical")
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -739,11 +744,11 @@ func copySecret(args []string) error {
 }
 
 // show users and secrets which they can access.
-func show(args []string) error {
+func show(filename string, args []string) error {
 	if len(args) > 1 {
 		return errors.New("bad args: expected `show [$user]`")
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -805,7 +810,7 @@ func showUser(shh *shh, username username) error {
 }
 
 // edit a secret using $EDITOR.
-func edit(nonInteractive bool, args []string) error {
+func edit(nonInteractive bool, filename string, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `edit $secret`")
 	}
@@ -843,7 +848,7 @@ func edit(nonInteractive bool, args []string) error {
 		return err
 	}
 
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -988,7 +993,7 @@ func edit(nonInteractive bool, args []string) error {
 
 // rotate generates new keys and re-encrypts all secrets using the new keys.
 // You should also use this to change your password.
-func rotate(args []string) error {
+func rotate(filename string, args []string) error {
 	if len(args) != 0 {
 		return errors.New("bad args: expected none")
 	}
@@ -1038,7 +1043,7 @@ func rotate(args []string) error {
 	if err != nil {
 		return err
 	}
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -1088,7 +1093,7 @@ func rotate(args []string) error {
 
 	// Rewrite the project file to use the new public key
 	if err = shh.EncodeToFile(); err != nil {
-		return fmt.Errorf("encode .shh: %w", err)
+		return fmt.Errorf("encode %s: %w", filename, err)
 	}
 
 	// Move new keys on top of current keys in the filesystem
@@ -1121,7 +1126,7 @@ func rotate(args []string) error {
 }
 
 // addUser to project file.
-func addUser(args []string) error {
+func addUser(filename string, args []string) error {
 	if len(args) != 0 && len(args) != 2 {
 		return errors.New("bad args: expected `add-user [$user $pubkey]`")
 	}
@@ -1132,7 +1137,7 @@ func addUser(args []string) error {
 	)
 	pledge(promises, execPromises)
 
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -1174,7 +1179,7 @@ func addUser(args []string) error {
 }
 
 // rmUser from project file.
-func rmUser(args []string) error {
+func rmUser(filename string, args []string) error {
 	if len(args) != 1 {
 		return errors.New("bad args: expected `rm-user $user`")
 	}
@@ -1185,7 +1190,7 @@ func rmUser(args []string) error {
 	)
 	pledge(promises, execPromises)
 
-	shh, err := shhFromPath(".shh")
+	shh, err := shhFromPath(filename)
 	if err != nil {
 		return err
 	}
@@ -1390,7 +1395,8 @@ global commands:
 	help			usage info
 
 flags:
-	-n			Non-interactive mode. Fail if shh would prompt for the password`)
+	-n			Non-interactive mode. Fail if shh would prompt for the password
+	-f			shh filename. Defaults to .shh`)
 }
 
 func backupReminder(withConfig bool) {

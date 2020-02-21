@@ -166,6 +166,14 @@ Count the number of secrets to which a user has access:
 shh show bob@example.com | wc -l
 ```
 
+See the changes in an shh file across commits:
+
+```
+vimdiff \
+	<(shh -f <(git show commit_1:.shh) get my_secret) \
+	<(shh -f <(git show commit_2:.shh) get my_secret)
+```
+
 
 ## Key commands
 
